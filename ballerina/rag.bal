@@ -112,6 +112,12 @@ public type VectorEntry record {|
     Document document;
 |};
 
+type DenseVectorEntry record {|
+    string id?;
+    Vector embedding;
+    Document document;
+|};
+
 # Represents a vector match result with similarity score.
 #
 # + similarityScore - Similarity score indicating how closely the vector matches the query 
@@ -164,60 +170,59 @@ public type VectorStore isolated object {
 
     # Adds vector entries to the store.
     #
-    # + entries - The array of vector entries to add.
-    # + return  - An `Error` if the operation fails; otherwise, `nil`.
+    # + entries - The array of vector entries to add
+    # + return - An `Error` if the operation fails; otherwise, `nil`
     public isolated function add(VectorEntry[] entries) returns Error?;
 
     # Searches for vectors in the store that are most similar to a given query.
     #
-    # + query  - The vector store query that specifies the search criteria.
+    # + query - The vector store query that specifies the search criteria
     # + return - An array of matching vectors with their similarity scores,
-    #            or an `Error` if the operation fails.
+    # or an `Error` if the operation fails
     public isolated function query(VectorStoreQuery query) returns VectorMatch[]|Error;
 
     # Deletes a vector entry from the store by its unique ID.
     #
-    # + id     - The unique identifier of the vector entry to delete.
-    # + return - An `Error` if the operation fails; otherwise, `nil`.
+    # + id - The unique identifier of the vector entry to delete
+    # + return - An `Error` if the operation fails; otherwise, `nil`
     public isolated function delete(string id) returns Error?;
 };
 
-# Represents an embedding provider that converts text into vector embeddings for similarity search.
+# Represents an embedding provider that converts text documents into vector embeddings for similarity search.
 public type EmbeddingProvider isolated client object {
 
-    # Converts the given text into a vector embedding.
+    # Converts the given document into a vector embedding.
     #
-    # + document - The input text to embed.
-    # + return   - The embedding vector representation, or an `Error` if embedding fails.
-    isolated remote function embed(string document) returns Embedding|Error;
+    # + document - The document to convert into an embedding.
+    # + return - The embedding vector representation on success, or an `Error` if the operation fails.
+    isolated remote function embed(Document document) returns Embedding|Error;
 };
 
-# Document retriever for finding relevant documents based on query similarity.
-# Retriever combines embedding generation and vector search to return matching documents.
+# Represents document retriever that finds relevant documents based on query similarity.
+# The `Retriever` combines query embedding generation and vector search
+# to return matching documents along with their similarity scores.
 public isolated class Retriever {
     private final VectorStore vectorStore;
     private final EmbeddingProvider embeddingModel;
 
-    # Initializes a new retriever instance.
-    # Sets up the retriever with the necessary components for
-    # query embedding and vector search operations.
+    # Initializes a new `Retriever` instance.
     #
-    # + vectorStore - The vector store to search in
-    # + embeddingProvider - The embedding provider to use for query embedding
+    #
+    # + vectorStore - The vector store to search in.
+    # + embeddingModel - The embedding provider to use for generating query embeddings
     public isolated function init(VectorStore vectorStore, EmbeddingProvider embeddingModel) {
         self.vectorStore = vectorStore;
         self.embeddingModel = embeddingModel;
     }
 
-    # Retrieves relevant documents for a given query.
-    # Embeds the query text and searches for similar vectors,
-    # returning matching documents with similarity scores.
+    # Retrieves relevant documents for the given query.
+    #
     #
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
-    # + return - Array of matching documents with scores or an error if retrieval fails
+    # + return - An array of matching documents with similarity scores, or an `Error` if retrieval fails
     public isolated function retrieve(string query, MetadataFilters? filters = ()) returns DocumentMatch[]|Error {
-        Embedding queryEmbedding = check self.embeddingModel->embed(query);
+        Embedding queryEmbedding = check self.embeddingModel->embed({content: query});
         VectorStoreQuery vectorStoreQuery = {
             embedding: queryEmbedding,
             filters: filters
@@ -228,20 +233,18 @@ public isolated class Retriever {
     }
 }
 
-# Vector knowledge base for managing document indexing and retrieval operations.
-# The vector knowledge base handles the process of converting documents to embeddings 
-# and storing them for retrieval.
+# Represents a vector knowledge base for managing document indexing and retrieval operations.
+# The `VectorKnowledgeBase` handles converting documents to embeddings,
+# storing them in a vector store, and enabling retrieval through a `Retriever`.
 public isolated class VectorKnowledgeBase {
     private final VectorStore vectorStore;
     private final EmbeddingProvider embeddingModel;
     private final Retriever retriever;
 
-    # Initializes a new vector knowledge base.
-    # Creates a vector knowledge base with the specified storage and embedding capabilities.
-    # The knowledge base manages the entire lifecycle from document ingestion to retrieval.
+    # Initializes a new `VectorKnowledgeBase` instance.
     #
-    # + vectorStore - The vector store for persistence
-    # + embeddingProvider - The embedding provider for vectorization
+    # + vectorStore - The vector store for embedding persistence
+    # + embeddingModel - The embedding provider for generating vector representations
     public isolated function init(VectorStore vectorStore, EmbeddingProvider embeddingModel) {
         self.vectorStore = vectorStore;
         self.embeddingModel = embeddingModel;
@@ -249,76 +252,71 @@ public isolated class VectorKnowledgeBase {
     }
 
     # Indexes a collection of documents.
-    # Converts documents to embeddings and stores them in the vector store.
-    # This operation makes the documents searchable through the retriever.
     #
-    # + documents - Array of documents to be indexed
-    # + return - An error if indexing fails, otherwise nil
+    # Converts each document to an embedding and stores it in the vector store,
+    # making the documents searchable through the retriever.
+    #
+    # + documents - The array of documents to index
+    # + return - An `Error` if indexing fails; otherwise, `nil`
     public isolated function index(Document[] documents) returns Error? {
         VectorEntry[] entries = [];
         foreach Document document in documents {
-            Embedding embedding = check self.embeddingModel->embed(document.content);
+            Embedding embedding = check self.embeddingModel->embed(document);
             entries.push({id: uuid:createRandomUuid(), embedding, document});
         }
         check self.vectorStore.add(entries);
     }
 
-    # Returns the retriever instance for this knowledge base.
-    # Provides access to the retriever for performing document searches against the indexed document collection.
+    # Returns the retriever for this knowledge base.
     #
-    # + return - The retriever instance
+    # + return - The `Retriever` instance for performing document searches
     public isolated function getRetriever() returns Retriever {
         return self.retriever;
     }
 }
 
-# Interface for building prompts from context documents and queries.
-# Prompt builders structure how retrieved documents and user queries 
-# are formatted for presentation to language models in RAG systems.
+# Represents a RAG prompt template that builds structured prompts from retrieved context and user queries
+# for presentation to Large Language Models in RAG systems.
 public type RagPromptTemplate isolated object {
-    # Builds a prompt from context documents and a query.
-    # Combines retrieved documents with the user query to create
-    # structured prompts for language model processing.
+
+    # Builds a prompt from the given context documents and query.
     #
-    # + context - Array of relevant documents retrieved for the query
+    # + context - The array of relevant documents to include as context
     # + query - The user's original query or question
-    # + return - A structured prompt ready for language model consumption
+    # + return - A formatted prompt ready for LLM consumption
     public isolated function format(Document[] context, string query) returns Prompt;
 };
 
-# Default implementation of prompt builder.
-# Provides a standard template for combining context documents with user queries.
-# Creates system prompts that instruct the model to answer based on provided context.
+# Default implementation of a RAG prompt template.
+# Provides a standard template for combining context documents with user queries,
+# creating system prompts that instruct the model to answer based on the provided context.
 public isolated class DefaultRagPromptTemplate {
     *RagPromptTemplate;
 
-    # Builds a default prompt template.
-    # Creates a system prompt with context documents and a user prompt with the query.
-    # The format follows common RAG patterns for context-aware question answering.
+    # Builds a default prompt. Creates a system prompt that includes the context documents,
+    # and a user prompt containing the query. Follows common RAG patterns
+    # for context-aware question answering.
     #
-    # + contextDocuments - Array of relevant documents to include as context
+    # + context - The array of relevant documents to include as context
     # + query - The user's question to be answered
-    # + return - A prompt with system instructions and user query
-    public isolated function format(Document[] contextDocuments, string query) returns Prompt {
+    # + return - A prompt containing system instructions and the user query
+    public isolated function format(Document[] context, string query) returns Prompt {
         string systemPrompt = string `Answer the question based on the following provided context: `
-            + string `<CONTEXT>${string:'join("\n", ...contextDocuments.'map(doc => doc.content))}</CONTEXT>`;
+            + string `<CONTEXT>${string:'join("\n", ...context.'map(doc => doc.content))}</CONTEXT>`;
         string userPrompt = "Question:\n" + query;
         return {systemPrompt, userPrompt};
     }
 }
 
-# WSO2 model provider implementation.
-# Provides chat completion capabilities using WSO2's language model services.
-# This is a concrete implementation of the ModelProvider interface.
+# WSO2 model provider implementation that provides chat completion capabilities using WSO2's AI services.
 public isolated client class Wso2ModelProvider {
     *ModelProvider;
     private final wso2:Client llmClient;
 
-    # Initializes a new WSO2 model provider instance.
-    # Sets up the HTTP client with authentication and service URL configuration.
+    # Initializes a new `WSO2ModelProvider` instance.
     #
-    # + config - WSO2 model provider configuration containing service URL and access token
-    # + return - An error if initialization fails (e.g., invalid configuration), otherwise nil
+    # + config - The configuration containing the service URL and access token
+    # + return - `nil` on success, or an `Error` if initialization fails
     public isolated function init(*Wso2ProviderConfig config) returns Error? {
         wso2:Client|error llmClient = new (config = {auth: {token: config.accessToken}}, serviceUrl = config.serviceUrl);
         if llmClient is error {
@@ -327,13 +325,12 @@ public isolated client class Wso2ModelProvider {
         self.llmClient = llmClient;
     }
 
-    # Processes chat messages and returns assistant response.
-    # Handles conversation context and optional tool integration for enhanced responses.
+    # Sends a chat request to the model with the given messages and tools.
     #
-    # + messages - Array of chat messages for conversation context
-    # + tools - Array of available functions/tools for the model
-    # + stop - Optional stop sequence for response generation
-    # + return - Assistant message response or LLM error
+    # + messages - List of chat messages 
+    # + tools - Tool definitions to be used for the tool call
+    # + stop - Stop sequence to stop the completion
+    # + return - Function to be called, chat response or an error in-case of failures
     isolated remote function chat(ChatMessage[] messages, ChatCompletionFunctions[] tools, string? stop = ())
     returns ChatAssistantMessage|LlmError {
         wso2:CreateChatCompletionRequest request = {stop, messages: self.mapToChatCompletionRequestMessage(messages)};
@@ -344,12 +341,10 @@ public isolated client class Wso2ModelProvider {
         if response is error {
             return error LlmConnectionError("Error while connecting to the model", response);
         }
-
-        var choices = response.choices;
-        if choices.length() == 0 {
+        if response.choices.length() == 0 {
             return error LlmInvalidResponseError("Empty response from the model when using function call API");
         }
-        wso2:ChatCompletionResponseMessage? message = choices[0].message;
+        wso2:ChatCompletionResponseMessage? message = response.choices[0].message;
         ChatAssistantMessage chatAssistantMessage = {role: ASSISTANT, content: message?.content};
         wso2:ChatCompletionFunctionCall? functionCall = message?.functionCall;
         if functionCall is wso2:ChatCompletionFunctionCall {
@@ -358,11 +353,6 @@ public isolated client class Wso2ModelProvider {
         return chatAssistantMessage;
     }
 
-    # Maps internal chat messages to WSO2 API format.
-    # Converts the generic ChatMessage types to WSO2-specific request message format.
-    #
-    # + messages - Array of internal chat messages
-    # + return - Array of WSO2 API compatible chat completion request messages
     private isolated function mapToChatCompletionRequestMessage(ChatMessage[] messages)
         returns wso2:ChatCompletionRequestMessage[] {
         wso2:ChatCompletionRequestMessage[] chatCompletionRequestMessages = [];
@@ -387,11 +377,6 @@ public isolated client class Wso2ModelProvider {
         return chatCompletionRequestMessages;
     }
 
-    # Maps WSO2 function call response to internal format.
-    # Converts WSO2 API function call format to internal FunctionCall type.
-    #
-    # + functionCall - WSO2 API function call response
-    # + return - Internal FunctionCall representation or LLM error if parsing fails
     private isolated function mapToFunctionCall(wso2:ChatCompletionFunctionCall functionCall)
     returns FunctionCall|LlmError {
         do {
@@ -404,18 +389,15 @@ public isolated client class Wso2ModelProvider {
     }
 }
 
-# In-memory vector store implementation.
-# Provides a simple in-memory storage solution for vector entries.
-# Suitable for development, testing, or small-scale applications where persistence is not required.
+# An in-memory vector store implementation that provides simple storage for vector entries.
 public isolated class InMemoryVectorStore {
     *VectorStore;
     private final VectorEntry[] entries = [];
     private final int topK;
 
     # Initializes a new in-memory vector store.
-    # Sets up the store with a configurable limit on the number of results returned per query.
     #
-    # + topK - Maximum number of top similar vectors to return in query results (default: 3)
+    # + topK - The maximum number of top similar vectors to return in query results
     public isolated function init(int topK = 3) {
         self.topK = topK;
     }
@@ -424,12 +406,10 @@ public isolated class InMemoryVectorStore {
     # Only supports dense vectors in this implementation.
     #
     # + entries - Array of vector entries to store
-    # + return - Error if non-dense vectors are provided, otherwise nil
+    # + return - `nil` on success; an Error if non-dense vectors are provided
     public isolated function add(VectorEntry[] entries) returns Error? {
-        foreach VectorEntry entry in entries {
-            if entry.embedding !is Vector {
-                return error Error("InMemoryVectorStore implementation only supports dense vectors");
-            }
+        if entries !is DenseVectorEntry[] {
+            return error Error("InMemoryVectorStore supports dense vectors exclusively");
         }
         readonly & VectorEntry[] clonedEntries = entries.cloneReadOnly();
         lock {
@@ -437,61 +417,49 @@ public isolated class InMemoryVectorStore {
         }
     }
 
-    # Queries the vector store for similar vectors.
-    # Uses cosine similarity for dense vector comparison and returns top-K results.
+    # Queries the vector store for vectors similar to the given query.
+    # Uses cosine similarity for dense vector comparison and returns the top-K results.
     #
     # + query - The query containing the embedding vector and optional filters
-    # + return - Array of vector matches sorted by similarity score (limited to topK) or error
+    # + return - An array of vector matches sorted by similarity score (limited to topK), 
+    # or an `Error` if the query fails
     public isolated function query(VectorStoreQuery query) returns VectorMatch[]|Error {
         if query.embedding !is Vector {
-            return error Error("InMemoryVectorStore implementation only supports dense vectors");
+            return error Error("InMemoryVectorStore supports dense vectors exclusively");
         }
 
         lock {
-            VectorMatch[] results = [];
-            foreach var entry in self.entries {
-                float similarity = self.cosineSimilarity(<Vector>query.embedding.clone(), <Vector>entry.embedding);
-                results.push({document: entry.document, embedding: entry.embedding, similarityScore: similarity});
-            }
-            var sorted = from var entry in results
-                order by entry.similarityScore descending
+            VectorMatch[] results = from var entry in self.entries
+                let float similarity = self.cosineSimilarity(<Vector>query.clone().embedding, <Vector>entry.embedding)
                 limit self.topK
-                select entry;
-            return sorted.clone();
+                select {document: entry.document, embedding: entry.embedding, similarityScore: similarity};
+            return results.clone();
         }
     }
 
     # Deletes a vector entry from the in-memory store.
     # Removes the entry that matches the given reference ID.
     #
-    # + referenceId - The reference ID of the vector entry to delete
-    # + return - Error if the reference ID is not found, otherwise nil
-    public isolated function delete(string referenceId) returns Error? {
+    # + id - The reference ID of the vector entry to delete
+    # + return - `Error` if the reference ID is not found, otherwise `nil`
+    public isolated function delete(string id) returns Error? {
         lock {
             int? indexToRemove = ();
             foreach int i in 0 ..< self.entries.length() {
-                if self.entries[i].id == referenceId {
+                if self.entries[i].id == id {
                     indexToRemove = i;
                     break;
                 }
             }
 
-            if indexToRemove is int {
-                _ = self.entries.remove(indexToRemove);
-            } else {
-                return error Error(string `Vector entry with reference ID '${referenceId}' not found`);
+            if indexToRemove is () {
+                return error Error(string `Vector entry with reference ID '${id}' not found`);
             }
+            _ = self.entries.remove(indexToRemove);
         }
     }
 
-    # Calculates cosine similarity between two dense vectors.
-    # Cosine similarity measures the cosine of the angle between two vectors,
-    # producing a value between -1 and 1 (typically normalized to 0-1 for similarity).
-    #
-    # + a - First vector for comparison
-    # + b - Second vector for comparison  
-    # + return - Cosine similarity score between 0 and 1, or 0.0 if vectors have different dimensions
-    isolated function cosineSimilarity(Vector a, Vector b) returns float {
+    private isolated function cosineSimilarity(Vector a, Vector b) returns float {
         if a.length() != b.length() {
             return 0.0;
         }
@@ -511,18 +479,15 @@ public isolated class InMemoryVectorStore {
     }
 }
 
-# WSO2 embedding provider implementation.
-# Provides text embedding capabilities using WSO2's embedding model services.
-# This is a concrete implementation of the EmbeddingProvider interface.
+# WSO2 embedding provider implementation that provides embedding capabilities using WSO2's AI service.
 public isolated client class Wso2EmbeddingProvider {
     *EmbeddingProvider;
     private final wso2:Client embeddingClient;
 
-    # Initializes a new WSO2 embedding provider instance.
-    # Sets up the HTTP client with authentication and service URL configuration.
+    # Initializes a new `Wso2EmbeddingProvider` instance.
     #
-    # + config - WSO2 model provider configuration containing service URL and access token
-    # + return - An error if initialization fails (e.g., invalid configuration), otherwise nil
+    # + config - The configuration containing the service URL and access token
+    # + return - `nil` on success, or an `Error` if initialization fails
     public isolated function init(*Wso2ProviderConfig config) returns Error? {
         wso2:Client|error embeddingClient = new (config = {auth: {token: config.accessToken}}, serviceUrl = config.serviceUrl);
         if embeddingClient is error {
@@ -531,13 +496,12 @@ public isolated client class Wso2EmbeddingProvider {
         self.embeddingClient = embeddingClient;
     }
 
-    # Converts document text to embedding vector.
-    # Transforms textual content into numerical vector representation for similarity search.
+    # Converts document to embedding.
     #
-    # + document - The text document to embed
-    # + return - Embedding vector representation or error if the embedding service fails
-    isolated remote function embed(string document) returns Embedding|Error {
-        wso2:EmbeddingRequest request = {input: document};
+    # + document - The document to embed
+    # + return - Embedding representation of document or an `Error` if the embedding service fails
+    isolated remote function embed(Document document) returns Embedding|Error {
+        wso2:EmbeddingRequest request = {input: document.content};
         wso2:EmbeddingResponse|error response = self.embeddingClient->/embeddings.post(request);
         if response is error {
             return error Error("Error generating embedding for provided document", response);
@@ -546,26 +510,20 @@ public isolated client class Wso2EmbeddingProvider {
     }
 }
 
-# Creates a default WSO2 model provider instance using global configuration.
-# Uses the configurable wso2ModelProviderConfig to initialize the provider.
-#
-# + return - Configured WSO2ModelProvider instance or error if configuration is missing
 isolated function getDefaultModelProvider() returns Wso2ModelProvider|Error {
     Wso2ProviderConfig? config = wso2ProviderConfig;
     if config is () {
-        return error Error("Set the WSO2 model provider config in toml file");
+        return error Error("The `wso2ProviderConfig` is not configured correctly."
+        + " Ensure that the WSO2 model provider configuration is defined in your TOML file.");
     }
     return new Wso2ModelProvider(config);
 }
 
-# Creates a default vector knowledge base with WSO2 services.
-# Sets up an in-memory vector store with WSO2 embedding provider using global configuration.
-#
-# + return - Configured VectorKnowledgeBase instance or error if configuration/initialization fails
 isolated function getDefaultKnowledgeBase() returns VectorKnowledgeBase|Error {
     Wso2ProviderConfig? config = wso2ProviderConfig;
     if config is () {
-        return error Error("Set the WSO2 model provider config in toml file");
+        return error Error("The `wso2ProviderConfig` is not configured correctly."
+        + " Ensure that the WSO2 model provider configuration is defined in your TOML file.");
     }
     EmbeddingProvider|Error wso2EmbeddingProvider = new Wso2EmbeddingProvider(config);
     if wso2EmbeddingProvider is Error {
@@ -574,22 +532,22 @@ isolated function getDefaultKnowledgeBase() returns VectorKnowledgeBase|Error {
     return new VectorKnowledgeBase(new InMemoryVectorStore(), wso2EmbeddingProvider);
 }
 
-# RAG (Retrieval-Augmented Generation) query engine.
-# The RAG class orchestrates the entire RAG pipeline: document retrieval,
-# prompt construction, and language model generation to answer user queries.
+# Orchestrates a Retrieval-Augmented Generation (RAG) pipeline.
+# The `Rag` class manages document retrieval, prompt construction, and language model interaction
+# to generate context-aware responses to user queries.
 public isolated class Rag {
     private final ModelProvider model;
     private final VectorKnowledgeBase knowledgeBase;
     private final RagPromptTemplate promptTemplate;
 
-    # Initializes a new RAG query engine.
-    # Sets up the complete RAG pipeline with model provider, knowledge base, and prompt template.
-    # Uses default implementations if specific components are not provided.
+    # Creates a new `Rag` instance.
     #
-    # + model - The language model provider for response generation (optional, uses default if nil)
-    # + knowledgeBase - The vector knowledge base containing searchable documents (optional, uses default if nil)
-    # + promptTemplate - Custom RAG prompt template (optional, defaults to DefaultRagPromptTemplate)
-    # + return - An error if initialization fails, otherwise nil
+    # + model - The large language model used by the RAG pipeline. If `nil`, `Wso2ModelProvider` is used as the default
+    # + knowledgeBase - The knowledge base containing indexed documents.
+    # If `nil`, a default `VectorKnowledgeBase` is created, backed by `InMemoryVectorStore` and `Wso2EmbeddingProvider`
+    # + promptTemplate - The RAG prompt template used by the language model to construct context-aware prompts.
+    # Defaults to `DefaultRagPromptTemplate` if not provided
+    # + return - `nil` on success, or an `Error` if initialization fails
     public isolated function init(ModelProvider? model = (),
             VectorKnowledgeBase? knowledgeBase = (),
             RagPromptTemplate promptTemplate = new DefaultRagPromptTemplate()) returns Error? {
@@ -598,13 +556,13 @@ public isolated class Rag {
         self.promptTemplate = promptTemplate;
     }
 
-    # Processes a query through the complete RAG pipeline.
-    # Retrieves relevant documents, builds context-aware prompts, and generates responses.
+    # Executes a query through the RAG pipeline.
+    # Retrieves context documents, builds a prompt, and generates a model response.
     #
-    # + query - The user's question or query
-    # + filters - Optional metadata filters to apply during retrieval (defaults to empty filters)
-    # + return - The generated response or an error if processing fails
-    public isolated function query(string query, MetadataFilters? filters = {}) returns string|Error {
+    # + query - The user’s input question or query.
+    # + filters - Optional metadata filters for document retrieval.
+    # + return - The generated response, or an `Error` if the operation fails.
+    public isolated function query(string query, MetadataFilters? filters = ()) returns string|Error {
         DocumentMatch[] context = check self.knowledgeBase.getRetriever().retrieve(query, filters);
         Prompt prompt = self.promptTemplate.format(context.'map(ctx => ctx.document), query);
         ChatMessage[] messages = self.mapPromptToChatMessages(prompt);
@@ -616,16 +574,11 @@ public isolated class Rag {
     # Processes and indexes documents to make them searchable for future queries.
     #
     # + documents - Array of documents to ingest
-    # + return - Error if ingestion fails, otherwise nil
+    # + return - `nil` on success; `Error` if ingestion fails 
     public isolated function ingest(Document[] documents) returns Error? {
         return self.knowledgeBase.index(documents);
     }
 
-    # Converts a prompt to chat message format.
-    # Transforms structured prompts into the chat message format expected by language models.
-    #
-    # + prompt - The prompt to convert
-    # + return - Array of chat messages ready for model consumption
     private isolated function mapPromptToChatMessages(Prompt prompt) returns ChatMessage[] {
         string? systemPrompt = prompt?.systemPrompt;
         string? userPrompt = prompt?.userPrompt;
@@ -638,7 +591,7 @@ public isolated class Rag {
         }
         return messages;
     }
-};
+}
 
 # Splits content into documents based on line breaks.
 # Each non-empty line becomes a separate document with the line content.
