@@ -112,12 +112,6 @@ public type VectorEntry record {|
     Document document;
 |};
 
-type DenseVectorEntry record {|
-    string id?;
-    Vector embedding;
-    Document document;
-|};
-
 # Represents a vector match result with similarity score.
 #
 # + similarityScore - Similarity score indicating how closely the vector matches the query 
@@ -408,8 +402,10 @@ public isolated class InMemoryVectorStore {
     # + entries - Array of vector entries to store
     # + return - `nil` on success; an Error if non-dense vectors are provided
     public isolated function add(VectorEntry[] entries) returns Error? {
-        if entries !is DenseVectorEntry[] {
-            return error Error("InMemoryVectorStore supports dense vectors exclusively");
+        foreach VectorEntry entry in entries {
+            if entry.embedding !is Vector {
+                return error Error("InMemoryVectorStore supports dense vectors exclusively");
+            }
         }
         readonly & VectorEntry[] clonedEntries = entries.cloneReadOnly();
         lock {
@@ -429,11 +425,12 @@ public isolated class InMemoryVectorStore {
         }
 
         lock {
-            VectorMatch[] results = from var entry in self.entries
-                let float similarity = self.cosineSimilarity(<Vector>query.clone().embedding, <Vector>entry.embedding)
+            VectorMatch[] sorted = from var entry in self.entries
+                let float similarity = self.cosineSimilarity(<Vector>query.embedding.clone(), <Vector>entry.embedding)
+                order by similarity descending
                 limit self.topK
                 select {document: entry.document, embedding: entry.embedding, similarityScore: similarity};
-            return results.clone();
+            return sorted.clone();
         }
     }
 
