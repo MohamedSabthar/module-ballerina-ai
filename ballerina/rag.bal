@@ -165,19 +165,19 @@ public type VectorStore isolated object {
     # Adds vector entries to the store.
     #
     # + entries - The array of vector entries to add.
-    # + return  - An `Error` if the operation fails; otherwise, `nil`.
+    # + return - An `Error` if the operation fails; otherwise, `nil`.
     public isolated function add(VectorEntry[] entries) returns Error?;
 
     # Searches for vectors in the store that are most similar to a given query.
     #
-    # + query  - The vector store query that specifies the search criteria.
+    # + query - The vector store query that specifies the search criteria.
     # + return - An array of matching vectors with their similarity scores,
-    #            or an `Error` if the operation fails.
+    # or an `Error` if the operation fails.
     public isolated function query(VectorStoreQuery query) returns VectorMatch[]|Error;
 
     # Deletes a vector entry from the store by its unique ID.
     #
-    # + id     - The unique identifier of the vector entry to delete.
+    # + id - The unique identifier of the vector entry to delete.
     # + return - An `Error` if the operation fails; otherwise, `nil`.
     public isolated function delete(string id) returns Error?;
 };
@@ -188,7 +188,7 @@ public type EmbeddingProvider isolated client object {
     # Converts the given text into a vector embedding.
     #
     # + document - The input text to embed.
-    # + return   - The embedding vector representation, or an `Error` if embedding fails.
+    # + return - The embedding vector representation, or an `Error` if embedding fails.
     isolated remote function embed(string document) returns Embedding|Error;
 };
 
@@ -252,13 +252,23 @@ public isolated class VectorKnowledgeBase {
     # Converts documents to embeddings and stores them in the vector store.
     # This operation makes the documents searchable through the retriever.
     #
+    # + ids - Optional array of IDs for the documents. If provided, must match documents array length
     # + documents - Array of documents to be indexed
     # + return - An error if indexing fails, otherwise nil
-    public isolated function index(Document[] documents) returns Error? {
+    public isolated function index(Document[] documents, string[]? ids = ()) returns Error? {
         VectorEntry[] entries = [];
-        foreach Document document in documents {
+
+        if ids is string[] && ids.length() != documents.length() {
+            return error Error("Number of IDs must match number of documents");
+        }
+
+        foreach int i in 0 ..< documents.length() {
+            Document document = documents[i];
             Embedding embedding = check self.embeddingModel->embed(document.content);
-            entries.push({id: uuid:createRandomUuid(), embedding, document});
+
+            string entryId = ids is string[] ? ids[i] : uuid:createRandomUuid();
+
+            entries.push({id: entryId, embedding, document});
         }
         check self.vectorStore.add(entries);
     }
@@ -604,7 +614,7 @@ public isolated class Rag {
     # + query - The user's question or query
     # + filters - Optional metadata filters to apply during retrieval (defaults to empty filters)
     # + return - The generated response or an error if processing fails
-    public isolated function query(string query, MetadataFilters? filters = {}) returns string|Error {
+    public isolated function query(string query, MetadataFilters? filters = ()) returns string|Error {
         DocumentMatch[] context = check self.knowledgeBase.getRetriever().retrieve(query, filters);
         Prompt prompt = self.promptTemplate.format(context.'map(ctx => ctx.document), query);
         ChatMessage[] messages = self.mapPromptToChatMessages(prompt);
