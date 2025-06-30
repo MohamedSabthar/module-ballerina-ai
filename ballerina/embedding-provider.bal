@@ -69,6 +69,9 @@ public distinct isolated client class Wso2EmbeddingProvider {
     # + document - The document to embed
     # + return - Embedding representation of document or an `Error` if the embedding service fails
     isolated remote function embed(Document document) returns Embedding|Error {
+        if document !is TextDocument {
+            return error Error("Wso2EmbeddingProvider currently supports embedding only for documents of type 'TextDocument'");
+        }
         intelligence:EmbeddingRequest request = {input: document.content};
         intelligence:EmbeddingResponse|error response = self.embeddingClient->/embeddings.post(request);
         if response is error {

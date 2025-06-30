@@ -75,7 +75,11 @@ isolated client distinct class MockLlm {
     isolated remote function chat(ai:ChatMessage[] messages, ai:ChatCompletionFunctions[] tools, string? stop)
         returns ai:ChatAssistantMessage|ai:LlmError {
         ai:ChatMessage lastMessage = messages.pop();
-        string query = lastMessage is ai:ChatUserMessage|ai:ChatFunctionMessage ? lastMessage.content ?: "" : "";
+        if lastMessage !is ai:ChatUserMessage|ai:ChatFunctionMessage {
+            return error ai:LlmError("I can't understand");
+        }
+        ai:PromptParts|string? lasMessageContent = lastMessage.content;
+        string query = getChatMessageStringContent(lasMessageContent ?: "");
         if query.includes("Mail Body") {
             return {role: ai:ASSISTANT, content: query};
         }
@@ -106,6 +110,24 @@ isolated client distinct class MockLlm {
         }
         return error ai:LlmError("I can't understand");
     }
+}
+
+isolated function getChatMessageStringContent(ai:PromptParts|string prompt) returns string {
+    if prompt is string {
+        return prompt;
+    }
+    string str = prompt.strings[0];
+    anydata[] insertions = prompt.insertions;
+    foreach int i in 0 ..< insertions.length() {
+        anydata value = insertions[i];
+        string promptStr = prompt.strings[i + 1];
+        if value is ai:TextDocument {
+            str = str + value.content + promptStr;
+            continue;
+        }
+        str = str + value.toString() + promptStr;
+    }
+    return str.trim();
 }
 
 final MockLlm model = new;

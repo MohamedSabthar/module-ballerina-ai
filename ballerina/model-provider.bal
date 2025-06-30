@@ -24,12 +24,17 @@ public enum ROLE {
     FUNCTION = "function"
 }
 
+public type PromptParts record {|
+    string[] & readonly strings;
+    anydata[] insertions;
+|};
+
 # User chat message record.
 public type ChatUserMessage record {|
     # Role of the message
     USER role;
     # Content of the message
-    string content;
+    string|PromptParts content;
     # An optional name for the participant
     # Provides the model information to differentiate between participants of the same role
     string name?;
@@ -40,7 +45,7 @@ public type ChatSystemMessage record {|
     # Role of the message
     SYSTEM role;
     # Content of the message
-    string content;
+    string|PromptParts content;
     # An optional name for the participant
     # Provides the model information to differentiate between participants of the same role
     string name?;
@@ -118,18 +123,25 @@ public type Wso2ProviderConfig record {|
 # Configurable for WSO2 provider.
 configurable Wso2ProviderConfig? wso2ProviderConfig = ();
 
+const DEFAULT_TEMPERATURE = 0.7d;
+
 # WSO2 model provider implementation that provides chat completion capabilities using WSO2's AI services.
 public isolated distinct client class Wso2ModelProvider {
     *ModelProvider;
     private final intelligence:Client llmClient;
+    private final decimal temperature;
 
     # Initializes a new `WSO2ModelProvider` instance.
     #
     # + serviceUrl - The base URL of WSO2 intelligence API endpoint
     # + accessToken - The access token for authenticating API requests
+    # + temperature - The temperature for controlling randomness in the model's output  
     # + connectionConfig - Additional HTTP connection configuration
     # + return - `nil` on success, or an `Error` if initialization fails
-    public isolated function init(string serviceUrl, string accessToken, *ConnectionConfig connectionConfig) returns Error? {
+    public isolated function init(@display {label: "Service URL"} string serviceUrl,
+            @display {label: "Access Token"} string accessToken,
+            @display {label: "Temperature"} decimal temperature = DEFAULT_TEMPERATURE,
+            @display {label: "Connection Configuration"} *ConnectionConfig connectionConfig) returns Error? {
         intelligence:ConnectionConfig intelligenceConfig = {
             auth: {
                 token: accessToken
@@ -154,6 +166,7 @@ public isolated distinct client class Wso2ModelProvider {
             return error Error("Failed to initialize Wso2ModelProvider", llmClient);
         }
         self.llmClient = llmClient;
+        self.temperature = temperature;
     }
 
     # Sends a chat request to the model with the given messages and tools.
@@ -164,7 +177,11 @@ public isolated distinct client class Wso2ModelProvider {
     # + return - Function to be called, chat response or an error in-case of failures
     isolated remote function chat(ChatMessage[] messages, ChatCompletionFunctions[] tools, string? stop = ())
     returns ChatAssistantMessage|LlmError {
-        intelligence:CreateChatCompletionRequest request = {stop, messages: self.mapToChatCompletionRequestMessage(messages)};
+        intelligence:CreateChatCompletionRequest request = {
+            stop,
+            messages: self.mapToChatCompletionRequestMessage(messages),
+            temperature: self.temperature
+        };
         if tools.length() > 0 {
             request.functions = tools;
         }
@@ -185,7 +202,7 @@ public isolated distinct client class Wso2ModelProvider {
     }
 
     private isolated function mapToChatCompletionRequestMessage(ChatMessage[] messages)
-        returns intelligence:ChatCompletionRequestMessage[] {
+    returns intelligence:ChatCompletionRequestMessage[] {
         intelligence:ChatCompletionRequestMessage[] chatCompletionRequestMessages = [];
         foreach ChatMessage message in messages {
             if message is ChatAssistantMessage {
@@ -201,6 +218,16 @@ public isolated distinct client class Wso2ModelProvider {
                     assistantMessage["content"] = message?.content;
                 }
                 chatCompletionRequestMessages.push(assistantMessage);
+            } else if message is ChatUserMessage|ChatSystemMessage {
+                PromptParts|string content = message.content;
+                intelligence:ChatCompletionRequestMessage trasnformedMessage = {
+                    role: message.role,
+                    "content": getChatMessageStringContent(content)
+                };
+                if message.name is string {
+                    trasnformedMessage["name"] = message.name;
+                }
+                chatCompletionRequestMessages.push(trasnformedMessage);
             } else {
                 chatCompletionRequestMessages.push(message);
             }

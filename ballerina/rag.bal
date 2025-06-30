@@ -47,7 +47,8 @@ public distinct isolated class VectorRetriever {
     # + filters - Optional metadata filters to apply during retrieval
     # + return - An array of matching documents with similarity scores, or an `Error` if retrieval fails
     public isolated function retrieve(string query, MetadataFilters? filters = ()) returns DocumentMatch[]|Error {
-        Embedding queryEmbedding = check self.embeddingModel->embed({content: query});
+        TextDocument queryDocument = {content: query, 'type: TEXT};
+        Embedding queryEmbedding = check self.embeddingModel->embed(queryDocument);
         VectorStoreQuery vectorStoreQuery = {
             embedding: queryEmbedding,
             filters: filters
@@ -124,22 +125,22 @@ public distinct isolated class VectorKnowledgeBase {
 public distinct isolated class Rag {
     private final ModelProvider model;
     private final KnowledgeBase knowledgeBase;
-    private final RagPromptTemplate promptTemplate;
+    private final RagPromptTemplateBuilder promptTemplateBuilder;
 
     # Creates a new `Rag` instance.
     #
     # + model - The large language model used by the RAG pipeline. If `nil`, `Wso2ModelProvider` is used as the default
     # + knowledgeBase - The knowledge base containing indexed documents.
     # If `nil`, a default `VectorKnowledgeBase` is created, backed by `InMemoryVectorStore` and `Wso2EmbeddingProvider`
-    # + promptTemplate - The RAG prompt template used by the language model to construct context-aware prompts.
-    # Defaults to `DefaultRagPromptTemplate` if not provided
+    # + promptTemplate - The function pointer of a RAG prompt template builder used to construct context-aware prompts.
+    # Defaults to `defaultRagPromptTemplateBuilder` if not provided
     # + return - `nil` on success, or an `Error` if initialization fails
     public isolated function init(ModelProvider? model = (),
             KnowledgeBase? knowledgeBase = (),
-            RagPromptTemplate promptTemplate = new DefaultRagPromptTemplate()) returns Error? {
+            RagPromptTemplateBuilder promptTemplate = defaultRagPromptTemplateBuilder) returns Error? {
         self.model = model ?: check getDefaultModelProvider();
         self.knowledgeBase = knowledgeBase ?: check getDefaultKnowledgeBase();
-        self.promptTemplate = promptTemplate;
+        self.promptTemplateBuilder = promptTemplate;
     }
 
     # Executes a query through the RAG pipeline.
@@ -150,10 +151,22 @@ public distinct isolated class Rag {
     # + return - The generated response, or an `Error` if the operation fails.
     public isolated function query(string query, MetadataFilters? filters = ()) returns string|Error {
         DocumentMatch[] context = check self.knowledgeBase.retrieve(query, filters);
-        Prompt prompt = self.promptTemplate.format(context.'map(ctx => ctx.document), query);
-        ChatMessage[] messages = self.mapPromptToChatMessages(prompt);
+        RagPrompt prompts = check self.executePromptBuilder(context.'map(ctx => ctx.document), query);
+        ChatMessage[] messages = self.mapPromptToChatMessages(prompts);
         ChatAssistantMessage response = check self.model->chat(messages, []);
         return response.content ?: error Error("Unable to obtain valid answer");
+    }
+
+    private isolated function executePromptBuilder(Document[] documents, string query) returns RagPrompt|Error {
+        var params = [documents, query];
+        any|error result = function:call(self.promptTemplateBuilder, ...params);
+        if result is error {
+            return error Error("Unable to construct prompt via provided prompt builder", result);
+        }
+        if result !is RagPrompt {
+            return error Error("Unable to construct prompt via provided prompt builder");
+        }
+        return result;
     }
 
     # Ingests documents into the knowledge base.
@@ -165,16 +178,14 @@ public distinct isolated class Rag {
         return self.knowledgeBase.index(documents);
     }
 
-    private isolated function mapPromptToChatMessages(Prompt prompt) returns ChatMessage[] {
-        string? systemPrompt = prompt?.systemPrompt;
-        string? userPrompt = prompt?.userPrompt;
+    private isolated function mapPromptToChatMessages(RagPrompt prompt) returns ChatMessage[] {
+        string|Prompt? systemPrompt = prompt?.systemPrompt;
+        string|Prompt userPrompt = prompt.userPrompt;
         ChatMessage[] messages = [];
-        if systemPrompt is string {
-            messages.push({role: SYSTEM, content: systemPrompt});
+        if systemPrompt !is () {
+            messages.push({role: SYSTEM, content: systemPrompt is string ? systemPrompt : getPromptParts(systemPrompt)});
         }
-        if userPrompt is string {
-            messages.push({role: USER, content: userPrompt});
-        }
+        messages.push({role: USER, content: userPrompt is string ? userPrompt : getPromptParts(userPrompt)});
         return messages;
     }
 }
