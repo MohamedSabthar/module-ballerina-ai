@@ -119,10 +119,28 @@ public distinct isolated class VectorKnowledgeBase {
     }
 }
 
+# Represents a Retrieval-Augmented Generation (RAG) pipeline.
+# The `Rag` interface defines methods for querying and ingesting documents
+public type Rag distinct isolated object {
+    # Executes a query through the RAG pipeline.
+    #
+    # + query - The user’s input question or query.
+    # + filters - Optional metadata filters for document retrieval.
+    # + return - The generated response, or an `Error` if the operation fails.
+    public isolated function query(string query, MetadataFilters? filters = ()) returns string|Error;
+
+    # Ingests documents via the RAG pipeline.
+    #
+    # + documents - Array of documents to ingest
+    # + return - `nil` on success; `Error` if ingestion fails 
+    public isolated function ingest(Document[] documents) returns Error?;
+};
+
 # Orchestrates a Retrieval-Augmented Generation (RAG) pipeline.
 # The `Rag` class manages document retrieval, prompt construction, and language model interaction
 # to generate context-aware responses to user queries.
-public distinct isolated class Rag {
+public distinct isolated class NaiveRag {
+    *Rag;
     private final ModelProvider model;
     private final KnowledgeBase knowledgeBase;
     private final RagPromptTemplateBuilder promptTemplateBuilder;
@@ -190,7 +208,7 @@ public distinct isolated class Rag {
     }
 }
 
-isolated function getDefaultModelProvider() returns Wso2ModelProvider|Error {
+public isolated function getDefaultModelProvider() returns Wso2ModelProvider|Error {
     Wso2ProviderConfig? config = wso2ProviderConfig;
     if config is () {
         return error Error("The `wso2ProviderConfig` is not configured correctly."
@@ -199,7 +217,7 @@ isolated function getDefaultModelProvider() returns Wso2ModelProvider|Error {
     return new Wso2ModelProvider(config.serviceUrl, config.accessToken);
 }
 
-isolated function getDefaultKnowledgeBase() returns VectorKnowledgeBase|Error {
+public isolated function getDefaultKnowledgeBase() returns VectorKnowledgeBase|Error {
     Wso2ProviderConfig? config = wso2ProviderConfig;
     if config is () {
         return error Error("The `wso2ProviderConfig` is not configured correctly."

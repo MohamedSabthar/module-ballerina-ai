@@ -14,15 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-# Splits content into documents based on line breaks.
-# Each non-empty line becomes a separate document with the line content.
-# Empty lines and lines containing only whitespace are filtered out.
-#
-# + content - The input text content to be split by lines
-# + return - Array of documents, one per non-empty line
-public isolated function splitDocumentByLine(string content) returns Document[] {
-    string[] lines = re `\n`.split(content);
-    return from string line in lines
-        where line.trim() != ""
-        select <TextDocument>{content: line.trim()};
+import ballerina/ai;
+import ballerina/http;
+
+listener http:Listener httpListener = http:getDefaultListener();
+listener ai:Listener chatListener = new (httpListener);
+
+service /chatService on chatListener {
+    resource function post chat(@http:Payload ai:ChatReqMessage request) returns ai:ChatRespMessage|error {
+        return {
+            message: request.sessionId + ": " + request.message
+        };
+    }
 }
