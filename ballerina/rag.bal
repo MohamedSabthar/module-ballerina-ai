@@ -47,7 +47,8 @@ public distinct isolated class VectorRetriever {
     # + filters - Optional metadata filters to apply during retrieval
     # + return - An array of matching documents with similarity scores, or an `Error` if retrieval fails
     public isolated function retrieve(string query, MetadataFilters? filters = ()) returns DocumentMatch[]|Error {
-        Embedding queryEmbedding = check self.embeddingModel->embed({content: query});
+        TextDocument queryDocument = {content: query, 'type: TEXT};
+        Embedding queryEmbedding = check self.embeddingModel->embed(queryDocument);
         VectorStoreQuery vectorStoreQuery = {
             embedding: queryEmbedding,
             filters: filters
@@ -118,68 +119,9 @@ public distinct isolated class VectorKnowledgeBase {
     }
 }
 
-# Orchestrates a Retrieval-Augmented Generation (RAG) pipeline.
-# The `Rag` class manages document retrieval, prompt construction, and language model interaction
-# to generate context-aware responses to user queries.
-public distinct isolated class Rag {
-    private final ModelProvider model;
-    private final KnowledgeBase knowledgeBase;
-    private final RagPromptTemplate promptTemplate;
-
-    # Creates a new `Rag` instance.
-    #
-    # + model - The large language model used by the RAG pipeline. If `nil`, `Wso2ModelProvider` is used as the default
-    # + knowledgeBase - The knowledge base containing indexed documents.
-    # If `nil`, a default `VectorKnowledgeBase` is created, backed by `InMemoryVectorStore` and `Wso2EmbeddingProvider`
-    # + promptTemplate - The RAG prompt template used by the language model to construct context-aware prompts.
-    # Defaults to `DefaultRagPromptTemplate` if not provided
-    # + return - `nil` on success, or an `Error` if initialization fails
-    public isolated function init(ModelProvider? model = (),
-            KnowledgeBase? knowledgeBase = (),
-            RagPromptTemplate promptTemplate = new DefaultRagPromptTemplate()) returns Error? {
-        self.model = model ?: check getDefaultModelProvider();
-        self.knowledgeBase = knowledgeBase ?: check getDefaultKnowledgeBase();
-        self.promptTemplate = promptTemplate;
-    }
-
-    # Executes a query through the RAG pipeline.
-    # Retrieves context documents, builds a prompt, and generates a model response.
-    #
-    # + query - The user’s input question or query.
-    # + filters - Optional metadata filters for document retrieval.
-    # + return - The generated response, or an `Error` if the operation fails.
-    public isolated function query(string query, MetadataFilters? filters = ()) returns string|Error {
-        DocumentMatch[] context = check self.knowledgeBase.retrieve(query, filters);
-        Prompt prompt = self.promptTemplate.format(context.'map(ctx => ctx.document), query);
-        ChatMessage[] messages = self.mapPromptToChatMessages(prompt);
-        ChatAssistantMessage response = check self.model->chat(messages, []);
-        return response.content ?: error Error("Unable to obtain valid answer");
-    }
-
-    # Ingests documents into the knowledge base.
-    # Processes and indexes documents to make them searchable for future queries.
-    #
-    # + documents - Array of documents to ingest
-    # + return - `nil` on success; `Error` if ingestion fails 
-    public isolated function ingest(Document[] documents) returns Error? {
-        return self.knowledgeBase.index(documents);
-    }
-
-    private isolated function mapPromptToChatMessages(Prompt prompt) returns ChatMessage[] {
-        string? systemPrompt = prompt?.systemPrompt;
-        string? userPrompt = prompt?.userPrompt;
-        ChatMessage[] messages = [];
-        if systemPrompt is string {
-            messages.push({role: SYSTEM, content: systemPrompt});
-        }
-        if userPrompt is string {
-            messages.push({role: USER, content: userPrompt});
-        }
-        return messages;
-    }
-}
-
-isolated function getDefaultModelProvider() returns Wso2ModelProvider|Error {
+# Creates a default model provider based on the provided `wso2ProviderConfig`.
+# + return - A `Wso2ModelProvider` instance if the configuration is valid; otherwise, an `ai:Error`.
+public isolated function getDefaultModelProvider() returns Wso2ModelProvider|Error {
     Wso2ProviderConfig? config = wso2ProviderConfig;
     if config is () {
         return error Error("The `wso2ProviderConfig` is not configured correctly."

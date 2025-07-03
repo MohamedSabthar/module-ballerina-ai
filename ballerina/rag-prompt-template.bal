@@ -14,35 +14,25 @@
 // specific language governing permissions and limitations
 // under the License.
 
-# Represents a RAG prompt template that builds structured prompts from retrieved context and user queries
+# Represents a RAG prompt template builder that builds structured prompts from retrieved context and user queries
 # for presentation to Large Language Models in RAG systems.
-public type RagPromptTemplate distinct isolated object {
+#
+# + context - The array of relevant documents to include as context
+# + query - The user's original query or question
+# + return - A record of formatted prompts ready for LLM consumption
+public type RagPromptTemplateBuilder isolated function (Document[] context, string query) returns RagPrompt;
 
-    # Builds a prompt from the given context documents and query.
-    #
-    # + context - The array of relevant documents to include as context
-    # + query - The user's original query or question
-    # + return - A formatted prompt ready for LLM consumption
-    public isolated function format(Document[] context, string query) returns Prompt;
-};
-
-# Default implementation of a RAG prompt template.
-# Provides a standard template for combining context documents with user queries,
-# creating system prompts that instruct the model to answer based on the provided context.
-public distinct isolated class DefaultRagPromptTemplate {
-    *RagPromptTemplate;
-
-    # Builds a default prompt. Creates a system prompt that includes the context documents,
-    # and a user prompt containing the query. Follows common RAG patterns
-    # for context-aware question answering.
-    #
-    # + context - The array of relevant documents to include as context
-    # + query - The user's question to be answered
-    # + return - A prompt containing system instructions and the user query
-    public isolated function format(Document[] context, string query) returns Prompt {
-        string systemPrompt = string `Answer the question based on the following provided context: `
-            + string `<CONTEXT>${string:'join("\n", ...context.'map(doc => doc.content))}</CONTEXT>`;
-        string userPrompt = "Question:\n" + query;
-        return {systemPrompt, userPrompt};
-    }
+# A Default implementation of a RagPromptTemplateBuilder.
+# Builds a default prompt. Creates a system prompt that includes the context documents,
+# and a user prompt containing the query. Follows common RAG patterns
+# for context-aware question answering.
+#
+# + context - The array of relevant documents to include as context
+# + query - The user's question to be answered
+# + return - A prompt containing system instructions and the user query
+public isolated function defaultRagPromptTemplateBuilder(Document[] context, string query) returns RagPrompt {
+    Prompt systemPrompt = `Answer the question based on the following provided context: 
+    <CONTEXT>${context}</CONTEXT>`;
+    string userPrompt = "Question:\n" + query;
+    return {systemPrompt, userPrompt};
 }

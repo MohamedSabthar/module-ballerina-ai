@@ -24,5 +24,5 @@ public isolated function splitDocumentByLine(string content) returns Document[] 
     string[] lines = re `\n`.split(content);
     return from string line in lines
         where line.trim() != ""
-        select {content: line.trim()};
+        select <TextDocument>{content: line.trim()};
 }

@@ -88,15 +88,6 @@ public type VectorStoreQuery record {|
     MetadataFilters filters?;
 |};
 
-# Represents a document with content and optional metadata.
-#
-# + content - The main text content of the document
-# + metadata - Optional key-value pairs that provide additional information about the document
-public type Document record {|
-    string content;
-    map<anydata> metadata?;
-|};
-
 # Represents a vector entry combining an embedding with its source document.
 #
 # + id - Optional unique identifier for the vector entry
@@ -134,11 +125,22 @@ public type DocumentMatch record {|
     float similarityScore;
 |};
 
-# Represents a prompt constructed by `RagPromptTemplate` object.
+# Represents a prompt constructed by `RagPromptTemplateBuilder`.
 #
 # + systemPrompt - System-level instructions that given to a Large Language Model
 # + userPrompt - The user's question or query given to the Large Language Model
-public type Prompt record {|
-    string systemPrompt?;
-    string userPrompt;
+public type RagPrompt record {|
+    string|Prompt systemPrompt?;
+    string|Prompt userPrompt;
 |};
+
+# Represents a prompt.
+#
+# + strings - Read-only array of string literals from the template
+# + insertions - Array of values to be inserted into the template, can be any data or Document types
+public type Prompt isolated object {
+    *object:RawTemplate;
+
+    public string[] & readonly strings;
+    public (anydata|Document)[] insertions;
+};
