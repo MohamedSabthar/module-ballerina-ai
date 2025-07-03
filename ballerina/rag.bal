@@ -21,7 +21,7 @@ public type Retriever distinct isolated object {
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
     # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
-    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns MatchResult[]|Error;
+    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns QueryMatch[]|Error;
 };
 
 # Represents a retriever that finds relevant chunks based on query similarity.
@@ -46,7 +46,7 @@ public distinct isolated class VectorRetriever {
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
     # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
-    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns MatchResult[]|Error {
+    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns QueryMatch[]|Error {
         TextChunk queryChunk = {content: query, 'type: "text-chunk"};
         Embedding queryEmbedding = check self.embeddingModel->embed(queryChunk);
         VectorStoreQuery vectorStoreQuery = {
@@ -72,7 +72,7 @@ public type KnowledgeBase distinct isolated object {
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
     # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
-    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns MatchResult[]|Error;
+    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns QueryMatch[]|Error;
 };
 
 # Represents a vector knowledge base for managing chunk indexing and retrieval operations.
@@ -114,7 +114,7 @@ public distinct isolated class VectorKnowledgeBase {
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
     # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
-    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns MatchResult[]|Error {
+    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns QueryMatch[]|Error {
         return self.retriever.retrieve(query, filters);
     }
 }

@@ -58,7 +58,7 @@ isolated function getChatMessageStringContent(PromptParts|string prompt) returns
     foreach int i in 0 ..< insertions.length() {
         anydata value = insertions[i];
         string promptStr = prompt.strings[i + 1];
-        if value is TextDocument {
+        if value is TextDocument|TextChunk {
             str = str + value.content + promptStr;
             continue;
         }

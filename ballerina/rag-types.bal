@@ -120,7 +120,7 @@ public enum VectorStoreQueryMode {
 #
 # + chunk - The matched content chunk
 # + similarityScore - Similarity score indicating chunk relevance to the query
-public type MatchResult record {|
+public type QueryMatch record {|
     Chunk chunk;
     float similarityScore;
 |};
