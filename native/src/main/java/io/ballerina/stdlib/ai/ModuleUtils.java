@@ -20,12 +20,17 @@ package io.ballerina.stdlib.ai;
 
 import io.ballerina.runtime.api.Environment;
 import io.ballerina.runtime.api.Module;
+import io.ballerina.runtime.api.creators.ErrorCreator;
+import io.ballerina.runtime.api.creators.TypeCreator;
+import io.ballerina.runtime.api.types.ErrorType;
 import io.ballerina.runtime.api.types.Type;
+import io.ballerina.runtime.api.utils.StringUtils;
 import io.ballerina.runtime.api.values.BError;
 
 public final class ModuleUtils {
     private static final String PACKAGE_ORG = "ballerina";
     private static final String PACKAGE_NAME = "ai";
+    private static final String ERROR_TYPE_NAME = "Error";
 
     private static Module module;
 
@@ -40,6 +45,11 @@ public final class ModuleUtils {
     @SuppressWarnings("unused")
     public static void setModule(Environment env) {
         module = env.getCurrentModule();
+    }
+
+    public static BError createError(String errorMessage) {
+        ErrorType errorType = TypeCreator.createErrorType(ERROR_TYPE_NAME, ModuleUtils.getModule());
+        return ErrorCreator.createError(errorType, StringUtils.fromString(errorMessage), null);
     }
 
     static boolean isModuleDefinedError(BError error) {

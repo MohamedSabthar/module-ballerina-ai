@@ -24,41 +24,84 @@ import dev.langchain4j.data.document.splitter.DocumentByLineSplitter;
 import dev.langchain4j.data.segment.TextSegment;
 import io.ballerina.runtime.api.creators.TypeCreator;
 import io.ballerina.runtime.api.creators.ValueCreator;
+import io.ballerina.runtime.api.types.RecordType;
 import io.ballerina.runtime.api.utils.StringUtils;
+import io.ballerina.runtime.api.values.BArray;
+import io.ballerina.runtime.api.values.BError;
 import io.ballerina.runtime.api.values.BMap;
 import io.ballerina.runtime.api.values.BString;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
 
 public class Chunkers {
-    public static Object chunkDocumentByLine(BMap document, int chunkSize, int overlapSize) {
-        System.out.println("chunk hit");
-        Document newDocument = Document.from(document.getStringValue(StringUtils.fromString("content")).getValue());
-        DocumentByLineSplitter splitter = new DocumentByLineSplitter(chunkSize, overlapSize);
-        List<TextSegment> chunks = splitter.split(newDocument);
-        List<Object> initValues = new ArrayList<>();
-        chunks.forEach(chunk -> {
-            Map<String, Object> values = new HashMap<>();
-            values.put("content", chunk.text());
-            Metadata metadata = chunk.metadata();
-            BMap<BString, Object> mymap = document.containsKey(StringUtils.fromString("metadata")) ? (BMap<BString, Object>) document.get(StringUtils.fromString("metadata")) : ValueCreator.createMapValue();
-            var map = metadata.toMap();
-            for (Map.Entry<String, Object> entry : map.entrySet()) {
-                if (entry.getKey().equals("index") && entry.getValue() instanceof String strVal) {
-                    mymap.put(StringUtils.fromString(entry.getKey()), Integer.parseInt(strVal));
-                }else if (entry.getValue() instanceof String strVal) {
-                    mymap.put(StringUtils.fromString(entry.getKey()), StringUtils.fromString(strVal));
-                } else if (!(entry.getValue() instanceof UUID)) {
-                    mymap.put(StringUtils.fromString(entry.getKey()), entry.getValue());
-                }
+    private static final String TEXT_CHUNK_RECORD_TYPE_NAME = "TextChunk";
+    private static final String META_DATA_RECORD_TYPE_NAME = "MetaData";
+    private static final String CONTENT_FIELD_NAME = "content";
+    private static final String METADATA_FIELD_NAME = "metadata";
+    private static final String INDEX_FIELD_NAME = "index";
+
+
+    public static Object chunkDocumentByLine(BMap<BString, Object> document, int chunkSize, int overlapSize) {
+        try {
+            String content = document.getStringValue(StringUtils.fromString(CONTENT_FIELD_NAME)).getValue();
+            Document inputDocument = Document.from(content);
+
+            DocumentByLineSplitter splitter = new DocumentByLineSplitter(chunkSize, overlapSize);
+            List<TextSegment> textSegments = splitter.split(inputDocument);
+
+            return createTextChunkRecordArray(document, textSegments);
+        } catch (RuntimeException e) {
+            return handleChunkingErrors(e);
+        }
+    }
+
+    private static BArray createTextChunkRecordArray(BMap<BString, Object> document, List<TextSegment> textSegments) {
+        Object[] chunkArray = textSegments.stream()
+                .map(textSegment -> createTextChunkRecord(document, textSegment)).toArray();
+        RecordType chunkRecordType = TypeCreator.createRecordType(TEXT_CHUNK_RECORD_TYPE_NAME, ModuleUtils.getModule(),
+                0, true, 0);
+        return ValueCreator.createArrayValue(chunkArray, TypeCreator.createArrayType(chunkRecordType));
+    }
+
+    private static BMap<BString, Object> createTextChunkRecord(BMap<BString, Object> document,
+                                                               TextSegment textSegment) {
+        Map<String, Object> textChunkRecordFields = new HashMap<>();
+        textChunkRecordFields.put(CONTENT_FIELD_NAME, textSegment.text());
+        textChunkRecordFields.put(METADATA_FIELD_NAME, createMetadataRecord(document, textSegment.metadata()));
+        return ValueCreator.createRecordValue(ModuleUtils.getModule(), TEXT_CHUNK_RECORD_TYPE_NAME,
+                textChunkRecordFields);
+    }
+
+    private static BMap<BString, Object> createMetadataRecord(BMap<BString, Object> document, Metadata metadata) {
+        BMap<BString, Object> existingMetadata = document.containsKey(StringUtils.fromString(METADATA_FIELD_NAME))
+                ? (BMap<BString, Object>) document.get(StringUtils.fromString(METADATA_FIELD_NAME))
+                : ValueCreator.createMapValue();
+
+        for (Map.Entry<String, Object> entry : metadata.toMap().entrySet()) {
+            BString key = StringUtils.fromString(entry.getKey());
+            Object value = entry.getValue();
+            if (INDEX_FIELD_NAME.equals(entry.getKey()) && value instanceof String stringValue) {
+                existingMetadata.put(key, Integer.parseInt(stringValue));
+            } else if (value instanceof String strVal) {
+                existingMetadata.put(key, StringUtils.fromString(strVal));
+            } else if (!(value instanceof UUID)) {
+                existingMetadata.put(key, value);
             }
-            values.put("metadata", ValueCreator.createRecordValue(ModuleUtils.getModule(), "MetaData", mymap));
-            BMap<BString, Object> textChunk = ValueCreator.createRecordValue(ModuleUtils.getModule(), "TextChunk", values);
-            initValues.add(textChunk);
-        });
-        BMap<BString, Object> type = ValueCreator.createRecordValue(ModuleUtils.getModule(), "TextChunk");
-        return ValueCreator.createArrayValue(initValues.toArray(),
-                TypeCreator.createArrayType(
-                        type.getType()));
+        }
+
+        return existingMetadata.isEmpty() ? null :
+                ValueCreator.createRecordValue(ModuleUtils.getModule(), META_DATA_RECORD_TYPE_NAME, existingMetadata);
+    }
+
+    private static BError handleChunkingErrors(RuntimeException e) {
+        // Since the concept of subSplitter is not exposed at the Ballerina level,
+        // we modify the error message thrown by the underlying Java implementation.
+        String subSplitterErrorRegex = ", and there is no subSplitter defined to split it further\\.";
+        String errorMessage = e.getMessage().replaceAll(subSplitterErrorRegex, ".");
+        return ModuleUtils.createError(errorMessage);
     }
 }
