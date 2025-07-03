@@ -124,7 +124,7 @@ isolated function getChatMessageStringContent(ai:PromptParts|string prompt) retu
     foreach int i in 0 ..< insertions.length() {
         anydata value = insertions[i];
         string promptStr = prompt.strings[i + 1];
-        if value is ai:TextDocument {
+        if value is ai:TextDocument|ai:TextChunk {
             str = str + value.content + promptStr;
             continue;
         }
