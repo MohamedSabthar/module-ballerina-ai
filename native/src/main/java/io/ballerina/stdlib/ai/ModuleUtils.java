@@ -22,6 +22,7 @@ import io.ballerina.runtime.api.Environment;
 import io.ballerina.runtime.api.Module;
 import io.ballerina.runtime.api.creators.ErrorCreator;
 import io.ballerina.runtime.api.creators.TypeCreator;
+import io.ballerina.runtime.api.creators.ValueCreator;
 import io.ballerina.runtime.api.types.ErrorType;
 import io.ballerina.runtime.api.types.Type;
 import io.ballerina.runtime.api.utils.StringUtils;
@@ -48,8 +49,8 @@ public final class ModuleUtils {
     }
 
     public static BError createError(String errorMessage) {
-        ErrorType errorType = TypeCreator.createErrorType(ERROR_TYPE_NAME, ModuleUtils.getModule());
-        return ErrorCreator.createError(errorType, StringUtils.fromString(errorMessage), null);
+        return ErrorCreator.createError(ModuleUtils.getModule(), ERROR_TYPE_NAME, StringUtils.fromString(errorMessage),
+                null, null);
     }
 
     static boolean isModuleDefinedError(BError error) {

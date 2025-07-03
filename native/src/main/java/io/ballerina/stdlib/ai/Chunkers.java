@@ -101,7 +101,7 @@ public class Chunkers {
         // Since the concept of subSplitter is not exposed at the Ballerina level,
         // we modify the error message thrown by the underlying Java implementation.
         String subSplitterErrorRegex = ", and there is no subSplitter defined to split it further\\.";
-        String errorMessage = e.getMessage().replaceAll(subSplitterErrorRegex, ".");
+        String errorMessage = e.getMessage().replaceAll(subSplitterErrorRegex, "");
         return ModuleUtils.createError(errorMessage);
     }
 }
