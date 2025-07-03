@@ -19,8 +19,9 @@
 package io.ballerina.stdlib.ai;
 
 import dev.langchain4j.data.document.Document;
+import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.Metadata;
-import dev.langchain4j.data.document.splitter.DocumentByLineSplitter;
+import dev.langchain4j.data.document.splitter.*;
 import dev.langchain4j.data.segment.TextSegment;
 import io.ballerina.runtime.api.creators.TypeCreator;
 import io.ballerina.runtime.api.creators.ValueCreator;
@@ -36,7 +37,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-
 public class Chunkers {
     private static final String TEXT_CHUNK_RECORD_TYPE_NAME = "TextChunk";
     private static final String META_DATA_RECORD_TYPE_NAME = "MetaData";
@@ -44,19 +44,31 @@ public class Chunkers {
     private static final String METADATA_FIELD_NAME = "metadata";
     private static final String INDEX_FIELD_NAME = "index";
 
-
-    public static Object chunkDocumentByLine(BMap<BString, Object> document, int chunkSize, int overlapSize) {
+    public static Object chunkDocument(BMap<BString, Object> document, int chunkSize, int maxOverlapSize,
+                                       BString chunkStrategy) {
         try {
             String content = document.getStringValue(StringUtils.fromString(CONTENT_FIELD_NAME)).getValue();
             Document inputDocument = Document.from(content);
 
-            DocumentByLineSplitter splitter = new DocumentByLineSplitter(chunkSize, overlapSize);
+            DocumentSplitter splitter = getDocumentSplitter(chunkStrategy, chunkSize, maxOverlapSize);
             List<TextSegment> textSegments = splitter.split(inputDocument);
 
             return createTextChunkRecordArray(document, textSegments);
         } catch (RuntimeException e) {
             return handleChunkingErrors(e);
         }
+    }
+
+    private static DocumentSplitter getDocumentSplitter(BString chunkStrategy, int maxChunkSize, int overlapSize) {
+        return switch (ChunkStrategy.fromString(chunkStrategy.getValue())) {
+            case LINE -> new DocumentByLineSplitter(maxChunkSize, overlapSize);
+            case CHARACTER -> new DocumentByCharacterSplitter(maxChunkSize, overlapSize);
+            case REGEX -> throw new RuntimeException("Not yet implemented");
+            case WORD -> new DocumentByWordSplitter(maxChunkSize, overlapSize);
+            case SENTENCE -> new DocumentBySentenceSplitter(maxChunkSize, overlapSize);
+            case PARAGRAPH -> new DocumentByParagraphSplitter(maxChunkSize, overlapSize);
+            case RECURSIVE -> DocumentSplitters.recursive(maxChunkSize, overlapSize);
+        };
     }
 
     private static BArray createTextChunkRecordArray(BMap<BString, Object> document, List<TextSegment> textSegments) {
@@ -103,5 +115,30 @@ public class Chunkers {
         String subSplitterErrorRegex = ", and there is no subSplitter defined to split it further\\.";
         String errorMessage = e.getMessage().replaceAll(subSplitterErrorRegex, "");
         return ModuleUtils.createError(errorMessage);
+    }
+}
+
+enum ChunkStrategy {
+    LINE("LINE"),
+    CHARACTER("CHARACTER"),
+    REGEX("REGEX"),
+    WORD("WORD"),
+    SENTENCE("SENTENCE"),
+    PARAGRAPH("PARAGRAPH"),
+    RECURSIVE("RECURSIVE");
+
+    private final String value;
+
+    ChunkStrategy(String value) {
+        this.value = value;
+    }
+
+    public static ChunkStrategy fromString(String value) {
+        for (ChunkStrategy status : ChunkStrategy.values()) {
+            if (status.value.equals(value)) {
+                return status;
+            }
+        }
+        throw new IllegalArgumentException("unknown chunking strategy " + value);
     }
 }

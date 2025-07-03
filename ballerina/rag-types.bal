@@ -144,3 +144,13 @@ public type Prompt isolated object {
     public string[] & readonly strings;
     public (anydata|Document)[] insertions;
 };
+
+enum ChunkStrategy {
+    CHARACTER,
+    LINE,
+    REGEX,
+    WORD,
+    SENTENCE,
+    PARAGRAPH,
+    HIERARCHICAL
+}

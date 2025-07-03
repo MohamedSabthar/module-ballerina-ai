@@ -16,12 +16,24 @@
 
 import ballerina/jballerina.java;
 
-# Splits documents based on line breaks.
+// TODO
+
+# Splits the provided `TextDocument` into lines and attempts to fit as many lines as possible into a single `TextChunk`, adhering to the limit set by `chunkSize`.
+# Line boundaries are detected by a minimum of one newline character ("\n"). Any additional whitespaces before or after are ignored. So, the following examples are all valid line separators: "\n", "\n\n", " \n", "\n " and so on.
+# If multiple lines fit within `chunkSize`, they are joined together using a newline ("\n").
+# If a single line is too long and exceeds `maxChunkSize` and can't be split further an Error is returned.
+# Each TextChunk inherits all metadata from the TextDocument and includes an "index" metadata key representing its position within the document (starting from 0).
 #
-# + document - The input text document to be split by lines
-# + chunkSize - The maximum size of each chunk
-# + overlapSize - The size of overlap between chunks (not used in this implementation)
-# + return - Array of text chunks, one per non-empty line
-public isolated function chunkDocumentByLine(Document document, int chunkSize = 512, int overlapSize = 0) returns TextChunk[]|Error = @java:Method {
+# + document - The input text document to be chunked
+# + maxChunkSize - The maximum size of each chunk
+# + maxOverlapSize - The size of overlap between chunks
+# + return - Array of text chunks on success, or an `ai:Error` if the operation fails
+public isolated function chunkDocumentByLine(TextDocument document, int maxChunkSize = 512, int maxOverlapSize = 0)
+returns TextChunk[]|Error {
+    return chunkDocument(document, maxChunkSize, maxOverlapSize, LINE);
+}
+
+isolated function chunkDocument(TextDocument document, int chunkSize, int overlapSize, ChunkStrategy chunkStrategy)
+returns TextChunk[]|Error = @java:Method {
     'class: "io.ballerina.stdlib.ai.Chunkers"
 } external;
