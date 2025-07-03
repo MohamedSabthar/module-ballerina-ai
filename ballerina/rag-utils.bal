@@ -14,15 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-# Splits content into documents based on line breaks.
-# Each non-empty line becomes a separate document with the line content.
-# Empty lines and lines containing only whitespace are filtered out.
+import ballerina/jballerina.java;
+
+# Splits documents based on line breaks.
 #
-# + content - The input text content to be split by lines
-# + return - Array of documents, one per non-empty line
-public isolated function splitDocumentByLine(string content) returns Document[] {
-    string[] lines = re `\n`.split(content);
-    return from string line in lines
-        where line.trim() != ""
-        select <TextDocument>{content: line.trim()};
-}
+# + document - The input text document to be split by lines
+# + chunkSize - The maximum size of each chunk
+# + overlapSize - The size of overlap between chunks (not used in this implementation)
+# + return - Array of text chunks, one per non-empty line
+public isolated function chunkDocumentByLine(Document document, int chunkSize = 512, int overlapSize = 0) returns TextChunk[]|Error = @java:Method {
+    'class: "io.ballerina.stdlib.ai.Chunkers"
+} external;

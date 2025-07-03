@@ -21,9 +21,9 @@ public type EmbeddingProvider distinct isolated client object {
 
     # Converts the given document into a vector embedding.
     #
-    # + document - The document to convert into an embedding.
-    # + return - The embedding vector representation on success, or an `Error` if the operation fails.
-    isolated remote function embed(Document document) returns Embedding|Error;
+    # + data - The data to be convert into an embedding
+    # + return - The embedding vector representation on success, or an `Error` if the operation fails
+    isolated remote function embed(Chunk|Document data) returns Embedding|Error;
 };
 
 # WSO2 embedding provider implementation that provides embedding capabilities using WSO2's AI service.
@@ -66,13 +66,13 @@ public distinct isolated client class Wso2EmbeddingProvider {
 
     # Converts document to embedding.
     #
-    # + document - The document to embed
+    # + data - The data to embed
     # + return - Embedding representation of document or an `Error` if the embedding service fails
-    isolated remote function embed(Document document) returns Embedding|Error {
-        if document !is TextDocument {
+    isolated remote function embed(Chunk|Document data) returns Embedding|Error {
+        if data !is TextDocument|TextChunk {
             return error Error("unsupported document type. only 'ai:TextDocument' is supported");
         }
-        intelligence:EmbeddingRequest request = {input: document.content};
+        intelligence:EmbeddingRequest request = {input: data.content};
         intelligence:EmbeddingResponse|error response = self.embeddingClient->/embeddings.post(request);
         if response is error {
             return error Error("Error generating embedding for provided document", response);

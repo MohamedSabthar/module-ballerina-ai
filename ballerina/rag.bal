@@ -47,7 +47,7 @@ public distinct isolated class VectorRetriever {
     # + filters - Optional metadata filters to apply during retrieval
     # + return - An array of matching documents with similarity scores, or an `Error` if retrieval fails
     public isolated function retrieve(string query, MetadataFilters? filters = ()) returns DocumentMatch[]|Error {
-        TextDocument queryDocument = {content: query, 'type: TEXT};
+        TextDocument queryDocument = {content: query, 'type: "text"};
         Embedding queryEmbedding = check self.embeddingModel->embed(queryDocument);
         VectorStoreQuery vectorStoreQuery = {
             embedding: queryEmbedding,

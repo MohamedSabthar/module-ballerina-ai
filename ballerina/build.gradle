@@ -38,6 +38,22 @@ ballerina {
     platform = "java21"
 }
 
+configurations {
+    externalJars
+}
+
+dependencies {
+    externalJars(group: 'dev.langchain4j', name: 'langchain4j', version: "1.1.0") {
+        transitive = false
+    }
+    externalJars(group: 'dev.langchain4j', name: 'langchain4j-core', version: "1.1.0") {
+        transitive = false
+    }
+    externalJars(group: 'org.apache.opennlp', name: 'opennlp-tools', version: "2.5.4") {
+        transitive = false
+    }
+}
+
 task updateTomlFiles {
     doLast {
         def newConfig = ballerinaTomlFilePlaceHolder.text.replace("@project.version@", project.version)

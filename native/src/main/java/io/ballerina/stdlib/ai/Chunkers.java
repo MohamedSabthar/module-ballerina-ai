@@ -16,7 +16,49 @@
  * under the License.
  */
 
-package io.ballerina.lib.ai;
+package io.ballerina.stdlib.ai;
+
+import dev.langchain4j.data.document.Document;
+import dev.langchain4j.data.document.Metadata;
+import dev.langchain4j.data.document.splitter.DocumentByLineSplitter;
+import dev.langchain4j.data.segment.TextSegment;
+import io.ballerina.runtime.api.creators.TypeCreator;
+import io.ballerina.runtime.api.creators.ValueCreator;
+import io.ballerina.runtime.api.utils.StringUtils;
+import io.ballerina.runtime.api.values.BMap;
+import io.ballerina.runtime.api.values.BString;
+
+import java.util.*;
 
 public class Chunkers {
+    public static Object chunkDocumentByLine(BMap document, int chunkSize, int overlapSize) {
+        System.out.println("chunk hit");
+        Document newDocument = Document.from(document.getStringValue(StringUtils.fromString("content")).getValue());
+        DocumentByLineSplitter splitter = new DocumentByLineSplitter(chunkSize, overlapSize);
+        List<TextSegment> chunks = splitter.split(newDocument);
+        List<Object> initValues = new ArrayList<>();
+        chunks.forEach(chunk -> {
+            Map<String, Object> values = new HashMap<>();
+            values.put("content", chunk.text());
+            Metadata metadata = chunk.metadata();
+            BMap<BString, Object> mymap = document.containsKey(StringUtils.fromString("metadata")) ? (BMap<BString, Object>) document.get(StringUtils.fromString("metadata")) : ValueCreator.createMapValue();
+            var map = metadata.toMap();
+            for (Map.Entry<String, Object> entry : map.entrySet()) {
+                if (entry.getKey().equals("index") && entry.getValue() instanceof String strVal) {
+                    mymap.put(StringUtils.fromString(entry.getKey()), Integer.parseInt(strVal));
+                }else if (entry.getValue() instanceof String strVal) {
+                    mymap.put(StringUtils.fromString(entry.getKey()), StringUtils.fromString(strVal));
+                } else if (!(entry.getValue() instanceof UUID)) {
+                    mymap.put(StringUtils.fromString(entry.getKey()), entry.getValue());
+                }
+            }
+            values.put("metadata", ValueCreator.createRecordValue(ModuleUtils.getModule(), "MetaData", mymap));
+            BMap<BString, Object> textChunk = ValueCreator.createRecordValue(ModuleUtils.getModule(), "TextChunk", values);
+            initValues.add(textChunk);
+        });
+        BMap<BString, Object> type = ValueCreator.createRecordValue(ModuleUtils.getModule(), "TextChunk");
+        return ValueCreator.createArrayValue(initValues.toArray(),
+                TypeCreator.createArrayType(
+                        type.getType()));
+    }
 }

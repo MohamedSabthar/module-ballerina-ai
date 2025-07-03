@@ -16,20 +16,8 @@
 
 import ballerina/time;
 
-# Enumeration of supported document types
-public enum DocumentKind {
-    # Text document type
-    TEXT = "text",
-    # Image document type  
-    IMAGE = "image",
-    # Audio document type
-    AUDIO = "audio",
-    # File document type
-    FILE = "file"
-}
-
-# Represents additional metadata associated with documents
-public type DocumentMetaData record {|
+# Represents additional metadata associated with documents or nodes.
+public type MetaData record {|
     # MIME type specification for the file
     string mimeType?;
     # File name for the document
@@ -43,13 +31,18 @@ public type DocumentMetaData record {|
     json...;
 |};
 
+# Represents a chunk of a document, which can be a text, image, audio, or file.
+public type Chunk record {|
+    *Document;
+|};
+
 # Represents the common structure for all document types
 public type Document record {|
-    # The type of document (text, image, audio, or file)
+    # The type of the node (text, image, audio, or file)
     string 'type;
-    # Metadata associated with the document
-    DocumentMetaData metadata?;
-    # The actual content of the document
+    # Metadata associated with the node
+    MetaData metadata?;
+    # The actual content
     anydata content;
 |};
 
@@ -57,11 +50,16 @@ public type Document record {|
 public type TextDocument record {|
     *Document;
     # Fixed type for the text document
-    readonly TEXT 'type = TEXT;
+    readonly "text" 'type = "text";
     # The text content of the document
     string content;
 |};
 
+# Represents a chunk of text within a document.
 public type TextChunk record {|
-    *TextDocument;
+    *Chunk;
+    # Fixed type for the text chunk
+    readonly "text-chunk" 'type = "text-chunk";
+    # The text content of the chunk
+    string content;
 |};
