@@ -83,7 +83,7 @@ public distinct isolated class InMemoryVectorStore {
                 let float similarity = self.cosineSimilarity(<Vector>query.embedding.clone(), <Vector>entry.embedding)
                 order by similarity descending
                 limit self.topK
-                select {document: entry.document, embedding: entry.embedding, similarityScore: similarity};
+                select {chunk: entry.chunk, embedding: entry.embedding, similarityScore: similarity};
             return sorted.clone();
         }
     }

@@ -44,7 +44,7 @@ public class Chunkers {
     private static final String METADATA_FIELD_NAME = "metadata";
     private static final String INDEX_FIELD_NAME = "index";
 
-    public static Object chunkDocument(BMap<BString, Object> document, int chunkSize, int maxOverlapSize,
+    public static Object chunkTextDocument(BMap<BString, Object> document, int chunkSize, int maxOverlapSize,
                                        BString chunkStrategy) {
         try {
             String content = document.getStringValue(StringUtils.fromString(CONTENT_FIELD_NAME)).getValue();

@@ -14,19 +14,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-# Represents document retriever that finds relevant documents based on query similarity.
+# Represents chunk retriever that finds relevant chunks based on query similarity.
 public type Retriever distinct isolated object {
-    # Retrieves relevant documents for the given query.
+    # Retrieves relevant chunks for the given query.
     #
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
-    # + return - An array of matching documents with similarity scores, or an `Error` if retrieval fails
-    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns DocumentMatch[]|Error;
+    # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
+    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns MatchResult[]|Error;
 };
 
-# Represents document retriever that finds relevant documents based on query similarity.
+# Represents a retriever that finds relevant chunks based on query similarity.
 # The `Retriever` combines query embedding generation and vector search
-# to return matching documents along with their similarity scores.
+# to return matching chunks along with their similarity scores.
 public distinct isolated class VectorRetriever {
     *Retriever;
     private final VectorStore vectorStore;
@@ -41,42 +41,42 @@ public distinct isolated class VectorRetriever {
         self.embeddingModel = embeddingModel;
     }
 
-    # Retrieves relevant documents for the given query.
+    # Retrieves relevant chunks for the given query.
     #
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
-    # + return - An array of matching documents with similarity scores, or an `Error` if retrieval fails
-    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns DocumentMatch[]|Error {
-        TextDocument queryDocument = {content: query, 'type: "text"};
-        Embedding queryEmbedding = check self.embeddingModel->embed(queryDocument);
+    # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
+    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns MatchResult[]|Error {
+        TextChunk queryChunk = {content: query, 'type: "text-chunk"};
+        Embedding queryEmbedding = check self.embeddingModel->embed(queryChunk);
         VectorStoreQuery vectorStoreQuery = {
             embedding: queryEmbedding,
             filters: filters
         };
         VectorMatch[] matches = check self.vectorStore.query(vectorStoreQuery);
         return from VectorMatch 'match in matches
-            select {document: 'match.document, similarityScore: 'match.similarityScore};
+            select {chunk: 'match.chunk, similarityScore: 'match.similarityScore};
     }
 }
 
-# Represents a knowledge base for managing document indexing and retrieval operations.
+# Represents a knowledge base for managing chunk indexing and retrieval operations.
 public type KnowledgeBase distinct isolated object {
-    # Indexes a collection of documents.
+    # Indexes a collection of chunks.
     #
-    # + documents - The array of documents to index
+    # + chunks - The array of chunk to index
     # + return - An `Error` if indexing fails; otherwise, `nil`
-    public isolated function index(Document[] documents) returns Error?;
+    public isolated function index(Chunk[] chunks) returns Error?;
 
-    # Retrieves relevant documents for the given query.
+    # Retrieves relevant chunks for the given query.
     #
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
-    # + return - An array of matching documents with similarity scores, or an `Error` if retrieval fails
-    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns DocumentMatch[]|Error;
+    # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
+    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns MatchResult[]|Error;
 };
 
-# Represents a vector knowledge base for managing document indexing and retrieval operations.
-# The `VectorKnowledgeBase` handles converting documents to embeddings,
+# Represents a vector knowledge base for managing chunk indexing and retrieval operations.
+# The `VectorKnowledgeBase` handles converting chunks to embeddings,
 # storing them in a vector store, and enabling retrieval through a `Retriever`.
 public distinct isolated class VectorKnowledgeBase {
     *KnowledgeBase;
@@ -94,27 +94,27 @@ public distinct isolated class VectorKnowledgeBase {
         self.retriever = new VectorRetriever(vectorStore, embeddingModel);
     }
 
-    # Indexes a collection of documents.
-    # Converts each document to an embedding and stores it in the vector store,
-    # making the documents searchable through the retriever.
+    # Indexes a collection of chunks.
+    # Converts each chunk to an embedding and stores it in the vector store,
+    # making the chunk searchable through the retriever.
     #
-    # + documents - The array of documents to index
+    # + chunks - The array of chunk to index
     # + return - An `Error` if indexing fails; otherwise, `nil`
-    public isolated function index(Document[] documents) returns Error? {
+    public isolated function index(Chunk[] chunks) returns Error? {
         VectorEntry[] entries = [];
-        foreach Document document in documents {
-            Embedding embedding = check self.embeddingModel->embed(document);
-            entries.push({embedding, document});
+        foreach Chunk chunk in chunks {
+            Embedding embedding = check self.embeddingModel->embed(chunk);
+            entries.push({embedding, chunk});
         }
         check self.vectorStore.add(entries);
     }
 
-    # Retrieves relevant documents for the given query.
+    # Retrieves relevant chunk for the given query.
     #
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
-    # + return - An array of matching documents with similarity scores, or an `Error` if retrieval fails
-    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns DocumentMatch[]|Error {
+    # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
+    public isolated function retrieve(string query, MetadataFilters? filters = ()) returns MatchResult[]|Error {
         return self.retriever.retrieve(query, filters);
     }
 }

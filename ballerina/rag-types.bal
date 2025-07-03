@@ -88,15 +88,15 @@ public type VectorStoreQuery record {|
     MetadataFilters filters?;
 |};
 
-# Represents a vector entry combining an embedding with its source document.
+# Represents a vector entry combining an embedding with its source chunk.
 #
 # + id - Optional unique identifier for the vector entry
-# + embedding - The vector representation of the document content
-# + document - The original document associated with the embedding
+# + embedding - The vector representation of the chunk content
+# + chunk - The chunk associated with the embedding
 public type VectorEntry record {|
     string id?;
     Embedding embedding;
-    Document document;
+    Chunk chunk;
 |};
 
 # Represents a vector match result with similarity score.
@@ -108,7 +108,7 @@ public type VectorMatch record {|
 |};
 
 # Represents query modes to be used with vector store.
-# Defines different search strategies for retrieving relevant documents
+# Defines different search strategies for retrieving relevant chunks
 # based on the type of embeddings and search algorithms to be used.
 public enum VectorStoreQueryMode {
     DENSE,
@@ -116,12 +116,12 @@ public enum VectorStoreQueryMode {
     HYBRID
 }
 
-# Represents a document match result with similarity score.
+# Represents a match result with similarity score.
 #
-# + document - The matched document
-# + similarityScore - Similarity score indicating document relevance to the query
-public type DocumentMatch record {|
-    Document document;
+# + chunk - The matched content chunk
+# + similarityScore - Similarity score indicating chunk relevance to the query
+public type MatchResult record {|
+    Chunk chunk;
     float similarityScore;
 |};
 
@@ -137,12 +137,12 @@ public type RagPrompt record {|
 # Represents a prompt.
 #
 # + strings - Read-only array of string literals from the template
-# + insertions - Array of values to be inserted into the template, can be any data or Document types
+# + insertions - Array of values to be inserted into the template, can be anydata, Document, or Chunk types
 public type Prompt isolated object {
     *object:RawTemplate;
 
     public string[] & readonly strings;
-    public (anydata|Document)[] insertions;
+    public (anydata|Document|Chunk|Chunk[])[] insertions;
 };
 
 enum ChunkStrategy {

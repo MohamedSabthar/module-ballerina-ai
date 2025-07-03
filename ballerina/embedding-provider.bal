@@ -16,14 +16,14 @@
 
 import ai.intelligence;
 
-# Represents an embedding provider that converts text documents into vector embeddings for similarity search.
+# Represents an embedding provider that converts chunk into vector embeddings for similarity search.
 public type EmbeddingProvider distinct isolated client object {
 
-    # Converts the given document into a vector embedding.
+    # Converts the given chunk into a vector embedding.
     #
-    # + data - The data to be convert into an embedding
+    # + chunk - The chunk to be convert into an embedding
     # + return - The embedding vector representation on success, or an `Error` if the operation fails
-    isolated remote function embed(Chunk|Document data) returns Embedding|Error;
+    isolated remote function embed(Chunk chunk) returns Embedding|Error;
 };
 
 # WSO2 embedding provider implementation that provides embedding capabilities using WSO2's AI service.
@@ -64,21 +64,21 @@ public distinct isolated client class Wso2EmbeddingProvider {
         self.embeddingClient = embeddingClient;
     }
 
-    # Converts document to embedding.
+    # Converts chunk to embedding.
     #
     # + data - The data to embed
-    # + return - Embedding representation of document or an `Error` if the embedding service fails
-    isolated remote function embed(Chunk|Document data) returns Embedding|Error {
-        if data !is TextDocument|TextChunk {
-            return error Error("unsupported document type. only 'ai:TextDocument' is supported");
+    # + return - Embedding representation of the chunk content or an `Error` if the embedding service fails
+    isolated remote function embed(Chunk data) returns Embedding|Error {
+        if data !is TextChunk {
+            return error Error("unsupported chunk type. only 'ai:TextChunk' is supported");
         }
         intelligence:EmbeddingRequest request = {input: data.content};
         intelligence:EmbeddingResponse|error response = self.embeddingClient->/embeddings.post(request);
         if response is error {
-            return error Error("Error generating embedding for provided document", response);
+            return error Error("Error generating embedding for provided chunk", response);
         }
         if response.data.length() == 0 {
-            return error Error("No embeddings generated for the provided document");
+            return error Error("No embeddings generated for the provided chunk");
         }
         return response.data[0].embedding;
     }
