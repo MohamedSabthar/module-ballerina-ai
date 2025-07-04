@@ -20,7 +20,7 @@ public type Retriever distinct isolated object {
     #
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
-    # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
+    # + return - An array of matching chunks with similarity scores, or an `ai:Error` if retrieval fails
     public isolated function retrieve(string query, MetadataFilters? filters = ()) returns QueryMatch[]|Error;
 };
 
@@ -34,7 +34,7 @@ public distinct isolated class VectorRetriever {
 
     # Initializes a new `Retriever` instance.
     #
-    # + vectorStore - The vector store to search in.
+    # + vectorStore - The vector store to search in
     # + embeddingModel - The embedding provider to use for generating query embeddings
     public isolated function init(VectorStore vectorStore, EmbeddingProvider embeddingModel) {
         self.vectorStore = vectorStore;
@@ -45,7 +45,7 @@ public distinct isolated class VectorRetriever {
     #
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
-    # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
+    # + return - An array of matching chunks with similarity scores, or an `ai:Error` if retrieval fails
     public isolated function retrieve(string query, MetadataFilters? filters = ()) returns QueryMatch[]|Error {
         TextChunk queryChunk = {content: query, 'type: "text-chunk"};
         Embedding queryEmbedding = check self.embeddingModel->embed(queryChunk);
@@ -64,14 +64,14 @@ public type KnowledgeBase distinct isolated object {
     # Indexes a collection of chunks.
     #
     # + chunks - The array of chunk to index
-    # + return - An `Error` if indexing fails; otherwise, `nil`
+    # + return - An `ai:Error` if indexing fails; otherwise, `nil`
     public isolated function index(Chunk[] chunks) returns Error?;
 
     # Retrieves relevant chunks for the given query.
     #
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
-    # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
+    # + return - An array of matching chunks with similarity scores, or an `ai:Error` if retrieval fails
     public isolated function retrieve(string query, MetadataFilters? filters = ()) returns QueryMatch[]|Error;
 };
 
@@ -99,7 +99,7 @@ public distinct isolated class VectorKnowledgeBase {
     # making the chunk searchable through the retriever.
     #
     # + chunks - The array of chunk to index
-    # + return - An `Error` if indexing fails; otherwise, `nil`
+    # + return - An `ai:Error` if indexing fails; otherwise, `nil`
     public isolated function index(Chunk[] chunks) returns Error? {
         VectorEntry[] entries = [];
         foreach Chunk chunk in chunks {
@@ -113,7 +113,7 @@ public distinct isolated class VectorKnowledgeBase {
     #
     # + query - The text query to search for
     # + filters - Optional metadata filters to apply during retrieval
-    # + return - An array of matching chunks with similarity scores, or an `Error` if retrieval fails
+    # + return - An array of matching chunks with similarity scores, or an `ai:Error` if retrieval fails
     public isolated function retrieve(string query, MetadataFilters? filters = ()) returns QueryMatch[]|Error {
         return self.retriever.retrieve(query, filters);
     }
@@ -138,7 +138,7 @@ isolated function getDefaultKnowledgeBase() returns VectorKnowledgeBase|Error {
     }
     EmbeddingProvider|Error wso2EmbeddingProvider = new Wso2EmbeddingProvider(config.serviceUrl, config.accessToken);
     if wso2EmbeddingProvider is Error {
-        return error Error("error creating default vector knowledge base");
+        return error Error("Error creating default vector knowledge base");
     }
     return new VectorKnowledgeBase(new InMemoryVectorStore(), wso2EmbeddingProvider);
 }

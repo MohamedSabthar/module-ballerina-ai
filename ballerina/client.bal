@@ -24,7 +24,7 @@ public isolated client class ChatClient {
     #
     # + serviceUrl - The base URL of the chat service.
     # + clientConfig - Configuration options for the chat client.
-    # + return - An `error` if the client initialization fails otherwise nil.
+    # + return - An `ai:Error` if the client initialization fails otherwise nil.
     public function init(string serviceUrl, *ChatClientConfiguration clientConfig) returns error? {
         http:ClientConfiguration clientConfigData = {...clientConfig};
         self.httpClient = check new(serviceUrl, clientConfigData);
@@ -33,7 +33,7 @@ public isolated client class ChatClient {
     # Handles incoming chat messages by sending a request to the chat service.
     #
     # + request - The chat request message to be sent.
-    # + return - A `ChatRespMessage` containing the response from the chat service, or an `error` if the request fails.
+    # + return - A `ChatRespMessage` containing the response from the chat service, or an `ai:Error` if the request fails.
     isolated resource function post chat(ChatReqMessage request) returns ChatRespMessage|error {
         return self.httpClient->/chat.post(request);
     }

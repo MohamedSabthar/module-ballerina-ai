@@ -22,7 +22,7 @@ public type EmbeddingProvider distinct isolated client object {
     # Converts the given chunk into a vector embedding.
     #
     # + chunk - The chunk to be convert into an embedding
-    # + return - The embedding vector representation on success, or an `Error` if the operation fails
+    # + return - The embedding vector representation on success, or an `ai:Error` if the operation fails
     isolated remote function embed(Chunk chunk) returns Embedding|Error;
 };
 
@@ -36,7 +36,7 @@ public distinct isolated client class Wso2EmbeddingProvider {
     # + serviceUrl - The base URL of WSO2 intelligence API endpoint
     # + accessToken - The access token for authenticating API requests
     # + connectionConfig - Additional HTTP connection configuration
-    # + return - `nil` on success, or an `Error` if initialization fails
+    # + return - `nil` on success, or an `ai:Error` if initialization fails
     public isolated function init(string serviceUrl, string accessToken, *ConnectionConfig connectionConfig) returns Error? {
         intelligence:ConnectionConfig intelligenceConfig = {
             auth: {
@@ -67,10 +67,10 @@ public distinct isolated client class Wso2EmbeddingProvider {
     # Converts chunk to embedding.
     #
     # + data - The data to embed
-    # + return - Embedding representation of the chunk content or an `Error` if the embedding service fails
+    # + return - Embedding representation of the chunk content or an `ai:Error` if the embedding service fails
     isolated remote function embed(Chunk data) returns Embedding|Error {
         if data !is TextChunk {
-            return error Error("unsupported chunk type. only 'ai:TextChunk' is supported");
+            return error Error("Unsupported chunk type. only 'ai:TextChunk' is supported");
         }
         intelligence:EmbeddingRequest request = {input: data.content};
         intelligence:EmbeddingResponse|error response = self.embeddingClient->/embeddings.post(request);

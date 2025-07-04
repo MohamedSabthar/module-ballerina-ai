@@ -137,7 +137,7 @@ public isolated distinct client class Wso2ModelProvider {
     # + accessToken - The access token for authenticating API requests
     # + temperature - The temperature for controlling randomness in the model's output  
     # + connectionConfig - Additional HTTP connection configuration
-    # + return - `nil` on success, or an `Error` if initialization fails
+    # + return - `nil` on success, or an `ai:Error` if initialization fails
     public isolated function init(@display {label: "Service URL"} string serviceUrl,
             @display {label: "Access Token"} string accessToken,
             @display {label: "Temperature"} decimal temperature = DEFAULT_TEMPERATURE,
