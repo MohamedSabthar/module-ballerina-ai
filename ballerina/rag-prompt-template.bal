@@ -14,25 +14,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-# Represents a RAG prompt template builder that builds structured prompts from retrieved context and user queries
-# for presentation to Large Language Models in RAG systems.
+# Augments the user's query with relevant context.
 #
-# + context - The array of relevant chunks to include as context
-# + query - The user's original query or question
-# + return - A record of formatted prompts ready for LLM consumption
-public type RagPromptTemplateBuilder isolated function (Chunk[] context, string query) returns RagPrompt;
-
-# A Default implementation of a RagPromptTemplateBuilder.
-# Builds a default prompt. Creates a system prompt that includes the context,
-# and a user prompt containing the query. Follows common RAG patterns
-# for context-aware question answering.
-#
-# + context - The array of relevant chunks to include as context
-# + query - The user's question to be answered
-# + return - A prompt containing system instructions and the user query
-public isolated function defaultRagPromptTemplateBuilder(Chunk[] context, string query) returns RagPrompt {
-    Prompt systemPrompt = `Answer the question based on the following provided context: 
-    <CONTEXT>${context}</CONTEXT>`;
-    string userPrompt = "Question:\n" + query;
-    return {systemPrompt, userPrompt};
+# + context - Array of matched chunks or documents to include as context
+# + query - The user's original question
+# + return - The augmented query with injected context
+public isolated function augmentUserQuery(QueryMatch[]|Document[] context, string query) returns ChatUserMessage {
+    Chunk[]|Document[] relevantContext = [];
+    if context is QueryMatch[] {
+        relevantContext = context.'map(queryMatch => queryMatch.chunk);
+    } else if context is Document[] {
+        relevantContext = context;
+    }
+    Prompt userPrompt = `Answer the question based on the following provided context: 
+    <CONTEXT>${relevantContext}</CONTEXT>
+    
+    Question: ${query}`;
+    return {role: USER, content: getPromptParts(userPrompt)};
 }

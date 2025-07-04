@@ -175,7 +175,7 @@ public isolated distinct client class Wso2ModelProvider {
     # + tools - Tool definitions to be used for the tool call
     # + stop - Stop sequence to stop the completion
     # + return - Function to be called, chat response or an error in-case of failures
-    isolated remote function chat(ChatMessage[] messages, ChatCompletionFunctions[] tools, string? stop = ())
+    isolated remote function chat(ChatMessage[]|ChatUserMessage messages, ChatCompletionFunctions[] tools, string? stop = ())
     returns ChatAssistantMessage|LlmError {
         intelligence:CreateChatCompletionRequest request = {
             stop,
@@ -201,8 +201,11 @@ public isolated distinct client class Wso2ModelProvider {
         return chatAssistantMessage;
     }
 
-    private isolated function mapToChatCompletionRequestMessage(ChatMessage[] messages)
+    private isolated function mapToChatCompletionRequestMessage(ChatMessage[]|ChatUserMessage messages)
     returns intelligence:ChatCompletionRequestMessage[] {
+        if messages is ChatUserMessage {
+            return [self.mapUserOrSystemMessage(messages)];
+        }
         intelligence:ChatCompletionRequestMessage[] chatCompletionRequestMessages = [];
         foreach ChatMessage message in messages {
             if message is ChatAssistantMessage {
@@ -219,11 +222,7 @@ public isolated distinct client class Wso2ModelProvider {
                 }
                 chatCompletionRequestMessages.push(assistantMessage);
             } else if message is ChatUserMessage|ChatSystemMessage {
-                PromptParts|string content = message.content;
-                intelligence:ChatCompletionRequestMessage trasnformedMessage = {
-                    role: message.role,
-                    "content": getChatMessageStringContent(content)
-                };
+                intelligence:ChatCompletionRequestMessage trasnformedMessage = self.mapUserOrSystemMessage(message);
                 if message.name is string {
                     trasnformedMessage["name"] = message.name;
                 }
@@ -244,5 +243,15 @@ public isolated distinct client class Wso2ModelProvider {
         } on fail error e {
             return error LlmError("Invalid or malformed arguments received in function call response.", e);
         }
+    }
+
+    private isolated function mapUserOrSystemMessage(ChatUserMessage|ChatSystemMessage message)
+    returns intelligence:ChatCompletionRequestMessage {
+        PromptParts|string content = message.content;
+        intelligence:ChatCompletionRequestMessage trasnformedMessage = {
+            role: message.role,
+            "content": getChatMessageStringContent(content)
+        };
+        return trasnformedMessage;
     }
 }
