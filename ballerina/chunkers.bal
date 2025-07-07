@@ -30,7 +30,7 @@ public type Chunker isolated object {
 };
 
 # Provides functionality to recursively chunk a text document using a configurable strategy.
-# 
+#
 # The chunking process begins with the specified strategy and recursively falls back to 
 # finer-grained strategies if the content exceeds the configured `maxChunkSize`. Overlapping content 
 # between chunks can be controlled using `maxOverlapSize`.
@@ -44,7 +44,9 @@ public isolated class RecursiveChunkder {
     # Initializes the `RecursiveChunkder` with chunking constraints.
     #
     # + maxChunkSize - Maximum number of characters allowed per chunk
-    # + maxOverlapSize - Number of overlapping characters allowed between chunks
+    # + maxOverlapSize - Maximum number of characters to reuse from the end of the previous chunk when creating the next one.
+    # This overlap is made of complete sentences taken in reverse from the previous chunk, without exceeding
+    # this limit. It helps maintain context between chunks during splitting.
     # + stratergy - The recursive chunking strategy to use. Defaults to `PARAGRAPH`
     public isolated function init(int maxChunkSize, int maxOverlapSize, RecursiveChunkStrategy stratergy = PARAGRAPH) {
         self.maxChunkSize = maxChunkSize;
