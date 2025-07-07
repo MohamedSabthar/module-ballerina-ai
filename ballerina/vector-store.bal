@@ -73,7 +73,6 @@ public distinct isolated class InMemoryVectorStore {
     }
 
     # Queries the vector store for vectors similar to the given query.
-    # Uses cosine similarity for dense vector comparison and returns the top-K results.
     #
     # + query - The query containing the embedding vector and optional filters
     # + return - An array of vector matches sorted by similarity score (limited to topK), 

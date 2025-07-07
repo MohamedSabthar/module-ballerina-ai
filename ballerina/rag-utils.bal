@@ -16,43 +16,55 @@
 
 import ballerina/jballerina.java;
 
-final Error unsupportedDocType = error Error("only text documents are supported for chunking");
+# Represents a document chunking strategy.
+# A `Chunker` is responsible for splitting a given `Document` into a list of smaller `Chunk`s.
+# This is typically used in Retrieval-Augmented Generation (RAG) pipelines to enable more
+# efficient retrieval and processing by breaking down large documents into manageable segments.
+public type Chunker isolated object {
 
-# Splits the provided `Document` into lines and attempts to fit as many lines as possible into a single `Chunk`, adhering to the limit set by `chunkSize`.
-# Line boundaries are detected by a minimum of one newline character ("\n"). Any additional whitespaces before or after are ignored. So, the following examples are all valid line separators: "\n", "\n\n", " \n", "\n " and so on.
-# If multiple lines fit within `chunkSize`, they are joined together using a newline ("\n").
-# If a single line is too long and exceeds `maxChunkSize` then it split using word boundaries, ensuring that no word is split in the middle.
-# Each `Chunk` inherits all metadata from the `Document` and includes an "index" metadata key representing its position within the document (starting from 0).
-#
-# + document - The input text document to be chunked
-# + maxChunkSize - The maximum size of each chunk
-# + maxOverlapSize - The size of overlap between chunks
-# + return - Array of text chunks on success, or an `ai:Error` if the operation fails
-public isolated function chunkDocumentByLine(Document document, int maxChunkSize = 512, int maxOverlapSize = 0)
-returns Chunk[]|Error {
-    if document !is TextDocument {
-        return unsupportedDocType;
+    # Splits the given document into smaller chunks.
+    #
+    # + document - The document to be chunked.
+    # + return - An array of `Chunk`s if successful, or an `Error` otherwise.
+    public isolated function chunk(Document document) returns Chunk[]|Error;
+};
+
+# Provides functionality to recursively chunk a text document using a configurable strategy.
+# 
+# The chunking process begins with the specified strategy and recursively falls back to 
+# finer-grained strategies if the content exceeds the configured `maxChunkSize`. Overlapping content 
+# between chunks can be controlled using `maxOverlapSize`.
+public isolated class RecursiveChunkder {
+    *Chunker;
+
+    private final int maxChunkSize;
+    private final int maxOverlapSize;
+    private final RecursiveChunkStrategy stratergy;
+
+    # Initializes the `RecursiveChunkder` with chunking constraints.
+    #
+    # + maxChunkSize - Maximum number of characters allowed per chunk
+    # + maxOverlapSize - Number of overlapping characters allowed between chunks
+    # + stratergy - The recursive chunking strategy to use. Defaults to `PARAGRAPH`
+    public isolated function init(int maxChunkSize, int maxOverlapSize, RecursiveChunkStrategy stratergy = PARAGRAPH) {
+        self.maxChunkSize = maxChunkSize;
+        self.maxOverlapSize = maxOverlapSize;
+        self.stratergy = stratergy;
     }
-    return chunkTextDocument(document, maxChunkSize, maxOverlapSize, LINE);
+
+    # Chunks the given text document using the configured recursive strategy.
+    #
+    # + document - The input document to be chunked.
+    # + return - An array of chunks, or an `Error` if the chunking fails.
+    public isolated function chunk(Document document) returns Chunk[]|Error {
+        if document !is TextDocument {
+            return error Error("Only text documents are supported for chunking");
+        }
+        return chunkTextDocument(document, self.maxChunkSize, self.maxOverlapSize, self.stratergy);
+    }
 }
 
-# Splits the provided `Document` into characters and attempts to fit as many characters as possible into a single `Chunk`, adhering to the limit set by `maxChunkSize`.
-# If multiple characters fit within `maxChunkSize`, they are joined together without delimiters.
-# Each `Chunk` inherits all metadata from the `Document` and includes an "index" metadata key representing its position within the document (starting from 0).
-#
-# + document - The input text document to be chunked
-# + maxChunkSize - The maximum size of each chunk
-# + maxOverlapSize - The size of overlap between chunks
-# + return - Array of text chunks on success, or an `ai:Error` if the operation fails
-public isolated function chunkDocumentByCharacter(Document document, int maxChunkSize = 512, int maxOverlapSize = 0)
-returns Chunk[]|Error {
-    if document !is TextDocument {
-        return unsupportedDocType;
-    }
-    return chunkTextDocument(document, maxChunkSize, maxOverlapSize, CHARACTER);
-}
-
-isolated function chunkTextDocument(TextDocument document, int chunkSize, int overlapSize, ChunkStrategy chunkStrategy)
+isolated function chunkTextDocument(TextDocument document, int chunkSize, int overlapSize, RecursiveChunkStrategy chunkStrategy)
 returns TextChunk[]|Error = @java:Method {
     'class: "io.ballerina.stdlib.ai.Chunkers"
 } external;

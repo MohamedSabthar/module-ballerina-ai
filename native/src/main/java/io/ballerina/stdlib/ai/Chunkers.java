@@ -26,7 +26,6 @@ import dev.langchain4j.data.document.splitter.DocumentByLineSplitter;
 import dev.langchain4j.data.document.splitter.DocumentByParagraphSplitter;
 import dev.langchain4j.data.document.splitter.DocumentBySentenceSplitter;
 import dev.langchain4j.data.document.splitter.DocumentByWordSplitter;
-import dev.langchain4j.data.document.splitter.DocumentSplitters;
 import dev.langchain4j.data.segment.TextSegment;
 import io.ballerina.runtime.api.creators.TypeCreator;
 import io.ballerina.runtime.api.creators.ValueCreator;
@@ -68,11 +67,9 @@ public class Chunkers {
         return switch (ChunkStrategy.fromString(chunkStrategy.getValue())) {
             case LINE -> new DocumentByLineSplitter(maxChunkSize, overlapSize);
             case CHARACTER -> new DocumentByCharacterSplitter(maxChunkSize, overlapSize);
-            case REGEX -> throw new RuntimeException("Not yet implemented");
             case WORD -> new DocumentByWordSplitter(maxChunkSize, overlapSize);
             case SENTENCE -> new DocumentBySentenceSplitter(maxChunkSize, overlapSize);
             case PARAGRAPH -> new DocumentByParagraphSplitter(maxChunkSize, overlapSize);
-            case RECURSIVE -> DocumentSplitters.recursive(maxChunkSize, overlapSize);
         };
     }
 
@@ -126,11 +123,9 @@ public class Chunkers {
 enum ChunkStrategy {
     LINE("LINE"),
     CHARACTER("CHARACTER"),
-    REGEX("REGEX"),
     WORD("WORD"),
     SENTENCE("SENTENCE"),
-    PARAGRAPH("PARAGRAPH"),
-    RECURSIVE("RECURSIVE");
+    PARAGRAPH("PARAGRAPH");
 
     private final String value;
 
