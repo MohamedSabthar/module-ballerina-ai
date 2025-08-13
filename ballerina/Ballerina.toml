@@ -47,3 +47,9 @@ groupId = "org.apache.tika"
 artifactId = "tika-parsers-standard-package"
 version = "3.2.2"
 path="./lib/tika-parsers-standard-package-3.2.2.jar"
+
+[[platform.java21.dependency]]
+groupId = "commons-io"
+artifactId = "commons-io"
+version = "2.20.0"
+path="./lib/commons-io-2.20.0.jar"

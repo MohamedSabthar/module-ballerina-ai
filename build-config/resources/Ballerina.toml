@@ -27,23 +27,29 @@ testOnly = true
 [[platform.java21.dependency]]
 groupId = "dev.langchain4j"
 artifactId = "langchain4j"
-version = "@langchain4j.version"
-path="./lib/langchain4j-@langchain4j.version.jar"
+version = "@langchain4j.version@"
+path="./lib/langchain4j-@langchain4j.version@.jar"
 
 [[platform.java21.dependency]]
 groupId = "dev.langchain4j"
 artifactId = "langchain4j-core"
-version = "@langchain4j.version"
-path="./lib/langchain4j-core-@langchain4j.version.jar"
+version = "@langchain4j.version@"
+path="./lib/langchain4j-core-@langchain4j.version@.jar"
 
 [[platform.java21.dependency]]
 groupId = "org.apache.tika"
 artifactId = "tika-core"
-version = "@tika.version"
-path="./lib/tika-core-@tika.version.jar"
+version = "@tika.version@"
+path="./lib/tika-core-@tika.version@.jar"
 
 [[platform.java21.dependency]]
 groupId = "org.apache.tika"
 artifactId = "tika-parsers-standard-package"
-version = "@tika.version"
-path="./lib/tika-parsers-standard-package-@tika.version.jar"
+version = "@tika.version@"
+path="./lib/tika-parsers-standard-package-@tika.version@.jar"
+
+[[platform.java21.dependency]]
+groupId = "commons-io"
+artifactId = "commons-io"
+version = "2.20.0"
+path="./lib/commons-io-2.20.0.jar"

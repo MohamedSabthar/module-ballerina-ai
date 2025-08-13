@@ -32,6 +32,7 @@ dependencies {
     implementation group: 'org.apache.opennlp', name: 'opennlp-tools', version: "${openNlpToolsVersion}"
     implementation group: 'org.apache.tika', name: 'tika-core', version: "${tikaVersion}"
     implementation group: 'org.apache.tika', name:'tika-parsers-standard-package', version: "${tikaVersion}"
+    implementation("commons-io:commons-io:2.20.0")
     
     checkstyle project(":checkstyle")
     checkstyle "com.puppycrawl.tools:checkstyle:${checkstylePluginVersion}"

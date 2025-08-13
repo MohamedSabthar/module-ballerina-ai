@@ -1,0 +1,326 @@
+// ------------------------------------------------------------------
+// Transitive dependencies of this project determined from the
+// maven pom organized by organization.
+// ------------------------------------------------------------------
+
+Apache Tika standard parser package
+
+
+From: 'an unknown organization'
+
+  - Adobe XMPCore (https://www.adobe.com/devnet/xmp/library/eula-xmp-library-java.html) com.adobe.xmp:xmpcore:bundle:6.1.11
+    License: The BSD 3-Clause License (BSD3)  (https://opensource.org/licenses/BSD-3-Clause)
+
+  - com.drewnoakes:metadata-extractor (https://drewnoakes.com/code/exif/) com.drewnoakes:metadata-extractor:jar:2.19.0
+    License: The Apache Software License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - parso (https://github.com/epam/parso) com.epam:parso:jar:2.0.14
+    License: Apache License v2  (http://www.apache.org/licenses/LICENSE-2.0.html)
+
+  - juniversalchardet (https://github.com/albfernandez/juniversalchardet) com.github.albfernandez:juniversalchardet:jar:2.5.0
+    License: Mozilla Public License Version 1.1  (https://www.mozilla.org/en-US/MPL/1.1/)
+    License: GENERAL PUBLIC LICENSE, version 3 (GPL-3.0)  (http://www.gnu.org/licenses/gpl.txt)
+    License: GNU LESSER GENERAL PUBLIC LICENSE, version 3 (LGPL-3.0)  (http://www.gnu.org/licenses/lgpl.txt)
+
+  - Java Unrar (https://github.com/junrar/junrar) com.github.junrar:junrar:jar:7.5.5
+    License: UnRar License  (https://github.com/junrar/junrar/blob/master/LICENSE)
+
+  - curvesapi (https://github.com/virtuald/curvesapi) com.github.virtuald:curvesapi:jar:1.08
+    License: BSD License  (http://opensource.org/licenses/BSD-3-Clause)
+
+  - dd-plist (http://www.github.com/3breadt/dd-plist) com.googlecode.plist:dd-plist:jar:1.28
+    License: MIT License  (http://opensource.org/licenses/mit)
+
+  - java-libpst (https://github.com/rjohnsondev/java-libpst) com.pff:java-libpst:jar:0.9.3
+    License: The Apache Software License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - rome (http://rometools.com/rome) com.rometools:rome:jar:2.1.0
+    License: The Apache Software License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - rome-utils (http://rometools.com/rome-utils) com.rometools:rome-utils:jar:2.1.0
+    License: The Apache Software License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - picocli (https://picocli.info) info.picocli:picocli:jar:4.7.6
+    License: The Apache Software License, version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Bouncy Castle JavaMail Jakarta S/MIME APIs (https://www.bouncycastle.org/download/bouncy-castle-java/) org.bouncycastle:bcjmail-jdk18on:jar:1.81
+    License: Bouncy Castle Licence  (https://www.bouncycastle.org/licence.html)
+
+  - Bouncy Castle PKIX, CMS, EAC, TSP, PKCS, OCSP, CMP, and CRMF APIs (https://www.bouncycastle.org/download/bouncy-castle-java/) org.bouncycastle:bcpkix-jdk18on:jar:1.81
+    License: Bouncy Castle Licence  (https://www.bouncycastle.org/licence.html)
+
+  - Bouncy Castle Provider (https://www.bouncycastle.org/download/bouncy-castle-java/) org.bouncycastle:bcprov-jdk18on:jar:1.81
+    License: Bouncy Castle Licence  (https://www.bouncycastle.org/licence.html)
+
+  - Bouncy Castle ASN.1 Extension and Utility APIs (https://www.bouncycastle.org/download/bouncy-castle-java/) org.bouncycastle:bcutil-jdk18on:jar:1.81
+    License: Bouncy Castle Licence  (https://www.bouncycastle.org/licence.html)
+
+  - org.brotli:dec (http://brotli.org/dec) org.brotli:dec:jar:0.1.2
+    License: MIT License  (http://www.opensource.org/licenses/mit-license.php)
+
+  - JHighlight (https://github.com/codelibs/jhighlight) org.codelibs:jhighlight:jar:1.1.0
+    License: CDDL, v1.0  (http://www.opensource.org/licenses/cddl1.php)
+    License: LGPL, v2.1 or later  (http://www.opensource.org/licenses/lgpl-license.php)
+
+  - Ogg and Vorbis for Java, Core (https://github.com/Gagravarr/VorbisJava) org.gagravarr:vorbis-java-core:jar:0.8
+    License: The Apache Software License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika plugin for Ogg, Vorbis and FLAC (https://github.com/Gagravarr/VorbisJava) org.gagravarr:vorbis-java-tika:jar:0.8
+    License: The Apache Software License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - jwarc (https://github.com/iipc/jwarc) org.netpreserve:jwarc:jar:0.32.0
+    License: Apache License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - JMatIO (https://github.com/tballison/jmatio) org.tallison:jmatio:jar:1.5
+    License: BSD  (http://www.linfo.org/bsdlicense.html)
+
+  - XZ for Java (https://tukaani.org/xz/java.html) org.tukaani:xz:jar:1.10
+    License: 0BSD 
+
+
+From: 'Apache Software Foundation' (https://www.apache.org/)
+
+  - Apache POI - Common (https://poi.apache.org/) org.apache.poi:poi:jar:5.4.1
+    License: Apache License, Version 2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache POI - API based on OPC and OOXML schemas (https://poi.apache.org/) org.apache.poi:poi-ooxml:jar:5.4.1
+    License: Apache License, Version 2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache POI (https://poi.apache.org/) org.apache.poi:poi-ooxml-lite:jar:5.4.1
+    License: Apache License, Version 2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache POI (https://poi.apache.org/) org.apache.poi:poi-scratchpad:jar:5.4.1
+    License: Apache License, Version 2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+
+From: 'Eclipse Foundation' (https://www.eclipse.org)
+
+  - istack common utility code runtime (https://projects.eclipse.org/projects/ee4j/istack-commons/istack-commons-runtime) com.sun.istack:istack-commons-runtime:jar:4.1.2
+    License: Eclipse Distribution License - v 1.0  (http://www.eclipse.org/org/documents/edl-v10.php)
+
+  - Jakarta Activation API (https://github.com/jakartaee/jaf-api) jakarta.activation:jakarta.activation-api:jar:2.1.3
+    License: EDL 1.0  (http://www.eclipse.org/org/documents/edl-v10.php)
+
+  - Jakarta XML Binding API (https://github.com/jakartaee/jaxb-api/jakarta.xml.bind-api) jakarta.xml.bind:jakarta.xml.bind-api:jar:4.0.2
+    License: Eclipse Distribution License - v 1.0  (http://www.eclipse.org/org/documents/edl-v10.php)
+
+  - Angus Activation Registries (https://github.com/eclipse-ee4j/angus-activation/angus-activation) org.eclipse.angus:angus-activation:jar:2.0.2
+    License: EDL 1.0  (http://www.eclipse.org/org/documents/edl-v10.php)
+
+  - JAXB Core (https://eclipse-ee4j.github.io/jaxb-ri/) org.glassfish.jaxb:jaxb-core:jar:4.0.5
+    License: Eclipse Distribution License - v 1.0  (http://www.eclipse.org/org/documents/edl-v10.php)
+
+  - JAXB Runtime (https://eclipse-ee4j.github.io/jaxb-ri/) org.glassfish.jaxb:jaxb-runtime:jar:4.0.5
+    License: Eclipse Distribution License - v 1.0  (http://www.eclipse.org/org/documents/edl-v10.php)
+
+  - TXW2 Runtime (https://eclipse-ee4j.github.io/jaxb-ri/) org.glassfish.jaxb:txw2:jar:4.0.5
+    License: Eclipse Distribution License - v 1.0  (http://www.eclipse.org/org/documents/edl-v10.php)
+
+
+From: 'FasterXML' (http://fasterxml.com/)
+
+  - Jackson-annotations (https://github.com/FasterXML/jackson) com.fasterxml.jackson.core:jackson-annotations:jar:2.19.2
+    License: The Apache Software License, Version 2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Jackson-core (https://github.com/FasterXML/jackson-core) com.fasterxml.jackson.core:jackson-core:jar:2.19.2
+    License: The Apache Software License, Version 2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - jackson-databind (https://github.com/FasterXML/jackson) com.fasterxml.jackson.core:jackson-databind:jar:2.19.2
+    License: The Apache Software License, Version 2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+
+From: 'jai-imageio GitHub group' (https://github.com/jai-imageio/)
+
+  - Java Advanced Imaging Image I/O Tools API core (standalone) (https://github.com/jai-imageio/jai-imageio-core) com.github.jai-imageio:jai-imageio-core:bundle:1.4.0
+    License: BSD 3-clause License w/nuclear disclaimer  (LICENSE.txt)
+
+
+From: 'JDOM' (http://www.jdom.org)
+
+  - JDOM (http://www.jdom.org) org.jdom:jdom2:jar:2.0.6.1
+    License: Similar to Apache License but with the acknowledgment clause removed  (https://raw.github.com/hunterhacker/jdom/master/LICENSE.txt)
+
+
+From: 'Jonathan Hedley' (https://jhedley.com/)
+
+  - jsoup Java HTML Parser (https://jsoup.org/) org.jsoup:jsoup:jar:1.21.1
+    License: The MIT License  (https://jsoup.org/license)
+
+
+From: 'OpenHMS' (https://openhms.sourceforge.io/)
+
+  - Jackcess (https://jackcess.sourceforge.io) com.healthmarketscience.jackcess:jackcess:jar:4.0.8
+    License: Apache License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Jackcess Encrypt (http://jackcessencrypt.sf.net) com.healthmarketscience.jackcess:jackcess-encrypt:jar:4.0.3
+    License: Apache License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+
+From: 'OW2' (http://www.ow2.org/)
+
+  - asm (http://asm.ow2.io/) org.ow2.asm:asm:jar:9.8
+    License: BSD-3-Clause  (https://asm.ow2.io/license.html)
+
+
+From: 'QOS.ch' (http://www.qos.ch)
+
+  - JCL 1.2 implemented over SLF4J (http://www.slf4j.org) org.slf4j:jcl-over-slf4j:jar:2.0.17
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - SLF4J API Module (http://www.slf4j.org) org.slf4j:slf4j-api:jar:2.0.17
+    License: MIT  (https://opensource.org/license/mit)
+
+
+From: 'The Apache Software Foundation' (http://pdfbox.apache.org)
+
+  - PDFBox JBIG2 ImageIO plugin (https://www.apache.org/jbig2-imageio/) org.apache.pdfbox:jbig2-imageio:jar:3.0.4
+    License: Apache License, Version 2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache JempBox (http://www.apache.org/pdfbox-parent/jempbox/) org.apache.pdfbox:jempbox:bundle:1.8.17
+    License: Apache License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+
+From: 'The Apache Software Foundation' (http://www.apache.org/)
+
+  - Apache Commons Math (http://commons.apache.org/proper/commons-math/) org.apache.commons:commons-math3:jar:3.6.1
+    License: Apache License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+
+From: 'The Apache Software Foundation' (https://pdfbox.apache.org)
+
+  - Apache FontBox (http://pdfbox.apache.org/) org.apache.pdfbox:fontbox:bundle:3.0.5
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache PDFBox (https://www.apache.org/pdfbox-parent/pdfbox/) org.apache.pdfbox:pdfbox:bundle:3.0.5
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache PDFBox io (https://www.apache.org/pdfbox-parent/pdfbox-io/) org.apache.pdfbox:pdfbox-io:bundle:3.0.5
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache PDFBox tools (https://www.apache.org/pdfbox-parent/pdfbox-tools/) org.apache.pdfbox:pdfbox-tools:jar:3.0.5
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache XmpBox (https://www.apache.org/pdfbox-parent/xmpbox/) org.apache.pdfbox:xmpbox:bundle:3.0.5
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+
+From: 'The Apache Software Foundation' (https://www.apache.org)
+
+  - Apache Tika Apple parser module (https://tika.apache.org/tika-parser-apple-module/) org.apache.tika:tika-parser-apple-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika audiovideo parser module (https://tika.apache.org/tika-parser-audiovideo-module/) org.apache.tika:tika-parser-audiovideo-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika cad parser module (https://tika.apache.org/tika-parser-cad-module/) org.apache.tika:tika-parser-cad-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika code parser module (https://tika.apache.org/tika-parser-code-module/) org.apache.tika:tika-parser-code-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika crypto parser module (https://tika.apache.org/tika-parser-crypto-module/) org.apache.tika:tika-parser-crypto-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika digest commons (https://tika.apache.org/tika-parser-digest-commons/) org.apache.tika:tika-parser-digest-commons:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika font parser module (https://tika.apache.org/tika-parser-font-module/) org.apache.tika:tika-parser-font-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika html parser module (https://tika.apache.org/tika-parser-html-module/) org.apache.tika:tika-parser-html-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika image parser module (https://tika.apache.org/tika-parser-image-module/) org.apache.tika:tika-parser-image-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika mail commons (https://tika.apache.org/tika-parser-mail-commons/) org.apache.tika:tika-parser-mail-commons:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika mail parser module (https://tika.apache.org/tika-parser-mail-module/) org.apache.tika:tika-parser-mail-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika Microsoft parser module (https://tika.apache.org/tika-parser-microsoft-module/) org.apache.tika:tika-parser-microsoft-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika miscellaneous office format parser module (https://tika.apache.org/tika-parser-miscoffice-module/) org.apache.tika:tika-parser-miscoffice-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika news parser module (https://tika.apache.org/tika-parser-news-module/) org.apache.tika:tika-parser-news-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika OCR parser module (https://tika.apache.org/tika-parser-ocr-module/) org.apache.tika:tika-parser-ocr-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika PDF parser module (https://tika.apache.org/tika-parser-pdf-module/) org.apache.tika:tika-parser-pdf-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika package parser module (https://tika.apache.org/tika-parser-pkg-module/) org.apache.tika:tika-parser-pkg-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika text parser module (https://tika.apache.org/tika-parser-text-module/) org.apache.tika:tika-parser-text-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika WARC parser module (https://tika.apache.org/tika-parser-webarchive-module/) org.apache.tika:tika-parser-webarchive-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika XML parser module (https://tika.apache.org/tika-parser-xml-module/) org.apache.tika:tika-parser-xml-module:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika XMP commons (https://tika.apache.org/tika-parser-xmp-commons/) org.apache.tika:tika-parser-xmp-commons:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Tika ZIP commons (https://tika.apache.org/tika-parser-zip-commons/) org.apache.tika:tika-parser-zip-commons:jar:3.2.2
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+
+From: 'The Apache Software Foundation' (https://www.apache.org/)
+
+  - Apache Commons Codec (https://commons.apache.org/proper/commons-codec/) commons-codec:commons-codec:jar:1.19.0
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Commons IO (https://commons.apache.org/proper/commons-io/) commons-io:commons-io:jar:2.20.0
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Commons Logging (https://commons.apache.org/proper/commons-logging/) commons-logging:commons-logging:jar:1.3.5
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Commons Collections (https://commons.apache.org/proper/commons-collections/) org.apache.commons:commons-collections4:jar:4.5.0
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Commons Compress (https://commons.apache.org/proper/commons-compress/) org.apache.commons:commons-compress:jar:1.28.0
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Commons CSV (https://commons.apache.org/proper/commons-csv/) org.apache.commons:commons-csv:jar:1.14.1
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Commons Exec (https://commons.apache.org/proper/commons-exec/) org.apache.commons:commons-exec:jar:1.5.0
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Commons Lang (https://commons.apache.org/proper/commons-lang/) org.apache.commons:commons-lang3:jar:3.18.0
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache James :: Mime4j :: Core (http://james.apache.org/mime4j/apache-mime4j-core) org.apache.james:apache-mime4j-core:bundle:0.8.13
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache James :: Mime4j :: DOM (http://james.apache.org/mime4j/apache-mime4j-dom) org.apache.james:apache-mime4j-dom:bundle:0.8.13
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+  - Apache Log4j API (https://logging.apache.org/log4j/2.x/) org.apache.logging.log4j:log4j-api:jar:2.25.1
+    License: Apache-2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+
+From: 'XmlBeans' (https://xmlbeans.apache.org/)
+
+  - XmlBeans (https://xmlbeans.apache.org/) org.apache.xmlbeans:xmlbeans:jar:5.3.0
+    License: The Apache Software License, Version 2.0  (https://www.apache.org/licenses/LICENSE-2.0.txt)
+
+
+From: 'Zaxxer.com' (https://github.com/brettwooldridge/SparseBitSet)
+
+  - SparseBitSet (https://github.com/brettwooldridge/SparseBitSet) com.zaxxer:SparseBitSet:jar:1.3
+    License: The Apache Software License, Version 2.0  (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+
+
+
+

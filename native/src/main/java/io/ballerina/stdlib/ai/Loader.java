@@ -19,9 +19,8 @@ import java.io.IOException;
 import java.io.InputStream;
 
 public class Loader {
-    public static Object readAsTextDocument(BString filePath) {
-        File file = new File(filePath.getValue());
-        try (InputStream stream = new FileInputStream(file)) {
+    public static Object externReadAsTextDocument(BString filePath) {
+        try (InputStream stream = new FileInputStream(filePath.getValue())) {
             AutoDetectParser parser = new AutoDetectParser();
             BodyContentHandler handler = new BodyContentHandler(-1); // -1 = unlimited length
             Metadata metadata = new Metadata();

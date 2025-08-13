@@ -13,8 +13,18 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
+import ballerina/file;
 import ballerina/jballerina.java;
 
-public isolated function readAsTextDocument(string filePath) returns TextDocument|Error = @java:Method {
+public isolated function readAsTextDocument(string filePath) returns TextDocument|Error {
+    string|error absolutePath = file:getAbsolutePath(filePath);
+    if absolutePath is error {
+        return error Error("failed to read file: " + absolutePath.message());
+    }
+    return externReadAsTextDocument(absolutePath);
+};
+
+isolated function externReadAsTextDocument(string filePath) returns TextDocument|Error = @java:Method {
     'class: "io.ballerina.stdlib.ai.Loader"
 } external;
