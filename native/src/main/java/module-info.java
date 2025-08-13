@@ -22,5 +22,7 @@ module io.ballerina.stdlib.ai {
     requires io.ballerina.lang.value;
     requires langchain4j;
     requires langchain4j.core;
-    exports io.ballerina.stdlib.ai;
+    requires org.apache.tika.core;
+    requires org.apache.tika.parsers.standard;
+    requires java.xml;
 }

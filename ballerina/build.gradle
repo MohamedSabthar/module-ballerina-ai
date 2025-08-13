@@ -52,6 +52,14 @@ dependencies {
     externalJars(group: 'org.apache.opennlp', name: 'opennlp-tools', version: "${project.openNlpToolsVersion}") {
         transitive = false
     }
+
+    externalJars(group: 'org.apache.tika', name: 'tika-core', version: "${project.tikaVersion}") {
+        transitive = false
+    }
+
+    externalJars(group: 'org.apache.tika', name: 'tika-parsers-standard-package', version: "${project.tikaVersion}") {
+        transitive = false
+    }
 }
 
 task updateTomlFiles {
@@ -60,6 +68,7 @@ task updateTomlFiles {
         newConfig = newConfig.replace("@toml.version@", tomlVersion)
         newConfig = newConfig.replace("@langchain4j.version", project.langchain4jVersion)
         newConfig = newConfig.replace("@openNlpTools.version", project.openNlpToolsVersion)
+        newConfig = newConfig.replace("@tika.version", project.tikaVersion)
         ballerinaTomlFile.text = newConfig
 
         def ballerinaToOpenApiVersion = project.ballerinaToOpenApiVersion
