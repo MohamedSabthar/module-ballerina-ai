@@ -19,27 +19,20 @@
 package io.ballerina.stdlib.ai;
 
 import io.ballerina.runtime.api.Environment;
+import io.ballerina.runtime.api.Runtime;
 import io.ballerina.runtime.api.creators.ErrorCreator;
 import io.ballerina.runtime.api.creators.TypeCreator;
 import io.ballerina.runtime.api.creators.ValueCreator;
-import io.ballerina.runtime.api.types.FunctionType;
-import io.ballerina.runtime.api.types.MapType;
-import io.ballerina.runtime.api.types.Parameter;
-import io.ballerina.runtime.api.types.PredefinedTypes;
-import io.ballerina.runtime.api.types.RecordType;
-import io.ballerina.runtime.api.types.ReferenceType;
-import io.ballerina.runtime.api.types.Type;
+import io.ballerina.runtime.api.types.*;
 import io.ballerina.runtime.api.utils.StringUtils;
 import io.ballerina.runtime.api.utils.TypeUtils;
-import io.ballerina.runtime.api.values.BError;
-import io.ballerina.runtime.api.values.BFunctionPointer;
-import io.ballerina.runtime.api.values.BMap;
-import io.ballerina.runtime.api.values.BString;
-import io.ballerina.runtime.api.values.BTypedesc;
+import io.ballerina.runtime.api.values.*;
+import org.apache.commons.math3.analysis.FunctionUtils;
 
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 
 import static io.ballerina.stdlib.ai.ModuleUtils.isModuleDefinedError;
 
@@ -132,5 +125,17 @@ public class Utils {
         } catch (Throwable throwable) {
             throw ErrorCreator.createError(throwable);
         }
+    }
+
+    public static BArray getMcpToolsMap(BObject mcpBaseToolkit) {
+        Type originalType = mcpBaseToolkit.getOriginalType();
+        MethodType[] methodTypes = ((ObjectType) originalType).getMethods();
+        BString agentToolAnnotation = StringUtils.fromString(ModuleUtils.getModule().toString() + ":AgentTool");
+        Stream<MethodType> tools = Arrays.stream(methodTypes)
+                .filter(methodType -> methodType.getAnnotation(agentToolAnnotation) != null);
+        Stream<String> mcpOriginalToolNames = tools.map(tool -> ((BMap) tool.getAnnotation(agentToolAnnotation))
+                .getStringValue(StringUtils.fromString("name")).getValue());
+        // TODO: get function pointer map and return
+        return ValueCreator.createMapValue();
     }
 }

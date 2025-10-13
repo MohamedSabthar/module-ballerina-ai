@@ -16,6 +16,7 @@
 
 import ballerina/http;
 import ballerina/mcp;
+import ballerina/jballerina.java;
 
 # Supported HTTP methods.
 public enum HttpMethod {
@@ -364,9 +365,9 @@ isolated function getInputSchemaValues(mcp:ToolDefinition tool) returns map<json
     return inputSchema;
 };
 
-public isolated function getPermittedMcpToolConfigs(mcp:StreamableHttpClient mcpClient, mcp:Implementation info,
-        map<FunctionTool> permittedTools) returns ToolConfig[]|error {
-    _ = check mcpClient->initialize(info);
+public isolated function getPermittedMcpToolConfigs(mcp:StreamableHttpClient mcpClient, McpBaseToolKit toolkit) returns ToolConfig[]|error {
+    map<FunctionTool> permittedTools = getMcpToolsMap(toolkit);
+    // _ = check mcpClient->initialize(info);
     mcp:ListToolsResult listTools = check mcpClient->listTools();
     return from mcp:ToolDefinition tool in listTools.tools
         where permittedTools.hasKey(tool.name)
@@ -377,3 +378,8 @@ public isolated function getPermittedMcpToolConfigs(mcp:StreamableHttpClient mcp
             caller: permittedTools.get(tool.name)
         };
 }
+
+public isolated function getMcpToolsMap(McpBaseToolKit toolkit) returns map<FunctionTool>  = @java:Method {
+    'class: "io.ballerina.stdlib.ai.Utils",
+    name: "getMcpToolsMap"
+} external;

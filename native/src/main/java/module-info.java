@@ -26,5 +26,6 @@ module io.ballerina.stdlib.ai {
     requires org.apache.tika.parser.pdf;
     requires java.xml;
     requires org.apache.tika.parser.microsoft;
+    requires commons.math3;
     exports io.ballerina.stdlib.ai;
 }

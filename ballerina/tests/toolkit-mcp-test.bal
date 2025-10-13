@@ -97,23 +97,28 @@ function testMcpToolKitWithInvalidUrl() returns error? {
 isolated class CustomMcpToolKit {
     *McpBaseToolKit;
     private final mcp:StreamableHttpClient mcpClient;
-    private final readonly & ToolConfig[] tools;
+    private ToolConfig[] tools = [];
 
     public isolated function init(string serverUrl = "http://localhost:3000/mcp",
             mcp:Implementation info = {name: "MCP", version: "1.0.0"},
             *mcp:StreamableHttpClientTransportConfig config) returns Error? {
-        final map<FunctionTool> permittedTools = {
-            "single-greeting": self.singleGreeting
-        };
         do {
             self.mcpClient = check new mcp:StreamableHttpClient(serverUrl, config);
-            self.tools = check getPermittedMcpToolConfigs(self.mcpClient, info, permittedTools).cloneReadOnly();
+            _ = check self.mcpClient->initialize(info);
         } on fail error e {
             return error Error("Failed to initialize MCP toolkit", e);
         }
     }
 
-    public isolated function getTools() returns ToolConfig[] => self.tools;
+    public isolated function getTools() returns ToolConfig[] {
+        lock {
+            if self.tools.length() > 0 {
+                return self.tools.cloneReadOnly();
+            }
+            self.tools = checkpanic getPermittedMcpToolConfigs(self.mcpClient, self).cloneReadOnly();
+            return self.tools.cloneReadOnly();
+        }
+    }
 
     @AgentTool
     public isolated function singleGreeting(mcp:CallToolParams params) returns mcp:CallToolResult|error {
