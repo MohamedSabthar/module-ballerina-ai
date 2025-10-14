@@ -13,6 +13,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import ai.observe;
+import ballerina/uuid;
 
 const INFER_TOOL_COUNT = "INFER_TOOL_COUNT";
 
@@ -74,6 +76,7 @@ public isolated distinct class Agent {
     private final int maxIter;
     private final readonly & SystemPrompt systemPrompt;
     private final boolean verbose;
+    private final string uniqueId = uuid:createRandomUuid();
 
     # Initialize an Agent.
     #
@@ -83,7 +86,23 @@ public isolated distinct class Agent {
         self.maxIter = maxIter is INFER_TOOL_COUNT ? config.tools.length() + 1 : maxIter;
         self.verbose = config.verbose;
         self.systemPrompt = config.systemPrompt.cloneReadOnly();
-        self.functionCallAgent = check new FunctionCallAgent(config.model, config.tools, config.memory);
+        FunctionCallAgent|Error functionCallAgent = new (config.model, config.tools, config.memory);
+
+        observe:Span span = new observe:SpanImp(string `create_agent ${self.systemPrompt.role}`);
+        span.addTag("gen_ai.operation.name", "create_agent");
+        span.addTag("gen_ai.provider.name", "Ballerina"); 
+        // span.addTag("gen_ai.agent.description", self.systemPrompt.instructions); // No need
+        span.addTag("gen_ai.agent.id", self.uniqueId);
+        span.addTag("gen_ai.agent.name", self.systemPrompt.role);
+        // "gen_ai.request.model"
+        span.addTag("gen_ai.system_instructions", getFomatedSystemPrompt(self.systemPrompt));
+        if functionCallAgent is Error {
+            span.addTag("error.type", functionCallAgent); // what is the standard way?
+            span.close(observe:ERROR);
+            return functionCallAgent;
+        }
+        span.close(observe:OK);
+        self.functionCallAgent = functionCallAgent;
     }
 
     # Executes the agent for a given user query.
@@ -95,13 +114,43 @@ public isolated distinct class Agent {
     public isolated function run(@display {label: "Query"} string query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new) returns string|Error {
+        observe:Span span = new observe:SpanImp(string `invoke_agent ${self.systemPrompt.role}`);
+        span.addTag("gen_ai.operation.name", "invoke_agent");
+        span.addTag("gen_ai.provider.name", "Ballerina");
+        // span.addTag("gen_ai.agent.description", self.systemPrompt.instructions); // may not need
+        span.addTag("gen_ai.agent.id", self.uniqueId);
+        span.addTag("gen_ai.agent.name", self.systemPrompt.role);
+        span.addTag("gen_ai.conversation.id", sessionId);
+        //gen_ai.data_source.id
+        span.addTag("gen_ai.output.type", "text");
+        // gen_ai.request.choice.count
+        // "gen_ai.request.model"
+        // gen_ai.request.seed
+        // gen_ai.request.frequency_penalty
+        // gen_ai.request.max_tokens
+        // gen_ai.request.presence_penalty
+        // gen_ai.request.stop_sequences
+        // gen_ai.request.temperature
+        // gen_ai.request.top_p
+        // gen_ai.response.finish_reasons
+        // gen_ai.response.id
+        // gen_ai.response.model
+        // gen_ai.usage.input_tokens
+        // gen_ai.usage.output_tokens
+     
+        // gen_ai.output.messages // have set it above self.modelProvider->chat()
+        span.addTag("gen_ai.system_instructions", getFomatedSystemPrompt(self.systemPrompt));
         ExecutionTrace result = self.functionCallAgent.run(query, getFomatedSystemPrompt(self.systemPrompt),
             self.maxIter, self.verbose, sessionId, context);
         string? answer = result.answer;
         if answer is string {
+            span.close(observe:OK);
             return answer;
         }
-        return constructError(result.steps, self.maxIter);
+        Error err = constructError(result.steps, self.maxIter);
+        span.addTag("error.type", err);
+        span.close(observe:ERROR);
+        return err;
     }
 }
 

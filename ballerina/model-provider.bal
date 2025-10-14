@@ -16,6 +16,7 @@
 
 import ai.intelligence;
 import ballerina/jballerina.java;
+import ai.observe;
 
 # Roles for the chat messages.
 public enum ROLE {
@@ -194,6 +195,29 @@ public isolated distinct client class Wso2ModelProvider {
     # + return - Function to be called, chat response or an error in-case of failures
     isolated remote function chat(ChatMessage[]|ChatUserMessage messages, ChatCompletionFunctions[] tools, string? stop = ())
     returns ChatAssistantMessage|Error {
+        observe:Span span = new observe:SpanImp("chat" + " " + "gpt-4o"); // confirm the model name of inteligence ep
+        span.addTag("gen_ai.operation.name", "chat"); // chat, text_completion, generate_content
+        span.addTag("gen_ai.provider.name", "Ballerina"); // confirm provider
+        span.addTag("gen_ai.conversation.id", ""); // check how to pass the agent session id here
+        span.addTag("gen_ai.output.type", "text");
+        // gen_ai.request.choice.count
+        span.addTag("gen_ai.request.model" , "gpt-4o"); // confirm the model name of inteligence ep
+        // gen_ai.request.seed
+        // gen_ai.request.frequency_penalty
+        span.addTag("gen_ai.request.max_tokens", ""); // max token missing here
+        // gen_ai.request.presence_penalty
+        if stop is string {
+        span.addTag("gen_ai.request.stop_sequences", stop);
+        }
+        span.addTag("gen_ai.request.temperature", self.temperature);
+        span.addTag("gen_ai.request.top_k", ""); // top_k missing here
+        span.addTag("gen_ai.request.top_p", ""); // top_p missing here
+        // gen_ai.response.finish_reasons
+        // gen_ai.response.id
+        span.addTag("gen_ai.response.model", "gpt-4o"); // confirm the model name of inteligence ep
+        // gen_ai.usage.input_tokens
+        // gen_ai.usage.output_tokens
+        span.addTag("gen_ai.input.messages", convertMessageToAnydata(messages)); // TODO: handle ai:Prompt object
         intelligence:CreateChatCompletionRequest request = {
             stop,
             messages: self.mapToChatCompletionRequestMessage(messages),
@@ -204,17 +228,23 @@ public isolated distinct client class Wso2ModelProvider {
         }
         intelligence:CreateChatCompletionResponse|error response = self.llmClient->/chat/completions.post(request);
         if response is error {
+            span.addTag("error.type", response);
+            span.close(observe:ERROR);
             return error LlmConnectionError("Error while connecting to the model", response);
         }
         if response.choices.length() == 0 {
             return error LlmInvalidResponseError("Empty response from the model when using function call API");
         }
         intelligence:ChatCompletionResponseMessage? message = response.choices[0].message;
+
         ChatAssistantMessage chatAssistantMessage = {role: ASSISTANT, content: message?.content};
         intelligence:ChatCompletionFunctionCall? functionCall = message?.functionCall;
         if functionCall is intelligence:ChatCompletionFunctionCall {
             chatAssistantMessage.toolCalls = [check self.mapToFunctionCall(functionCall)];
         }
+        span.addTag("gen_ai.output.messages", chatAssistantMessage);
+        // gen_ai.system_instructions
+        span.close(observe:OK);
         return chatAssistantMessage;
     }
 
@@ -280,4 +310,34 @@ public isolated distinct client class Wso2ModelProvider {
         role: message.role,
         "content": getChatMessageStringContent(message.content)
     };
+
+    public isolated function getModelName() returns string {
+        return "gpt-4o";
+    }
+
+    public isolated function getProviderrName() returns string {
+        return "wso2";
+    }
+}
+
+isolated function convertMessageToAnydata(ChatMessage[]|ChatMessage messages) returns anydata {
+    if messages is ChatUserMessage|ChatSystemMessage {
+        return convertUserMessageToAnydata(messages);
+    }
+    if messages is ChatMessage {
+        return messages;
+    }
+    return messages.'map(msg => msg is ChatUserMessage|ChatSystemMessage ? convertUserMessageToAnydata(msg) : msg);
+}
+
+isolated function convertUserMessageToAnydata(ChatUserMessage|ChatSystemMessage message) returns anydata {
+    Prompt|string content = message.content;
+    if content is Prompt {
+        return {
+            role: message.role,
+            content: getChatMessageStringContent(message.content),
+            name: message.name
+        };
+    }
+    return content;
 }

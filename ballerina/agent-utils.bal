@@ -16,6 +16,7 @@
 
 import ballerina/io;
 import ballerina/log;
+import ai.observe;
 
 # Execution progress record
 type ExecutionProgress record {|
@@ -173,7 +174,17 @@ class Executor {
 
         anydata observation;
         ExecutionResult|ExecutionError executionResult;
+        
         if parsedOutput is LlmToolResponse {
+            observe:Span span = new observe:SpanImp("execute_tool " + parsedOutput.name);
+            span.addTag("gen_ai.operation.name", "execute_tool");
+            span.addTag("gen_ai.tool.call.id", parsedOutput.id ?: "not_available"); // TODO: generate an id if not available
+            // span.addTag("gen_ai.tool.description", "") // TODO: add tool description
+            span.addTag("gen_ai.tool.name", parsedOutput.name);
+            span.addTag("gen_ai.tool.type", "function");
+            span.addTag("gen_ai.input.messages", []);
+
+            // gen_ai.system_instructions, gen_ai.input.messages, gen_ai.output.messages // TODO: check compliance requirements
             ToolOutput|ToolExecutionError|LlmInvalidGenerationError output = self.agent.toolStore.execute(parsedOutput,
                 self.progress.context);
             if output is Error {
@@ -196,6 +207,7 @@ class Executor {
                     tool: parsedOutput,
                     observation: value
                 };
+                span.close(observe:OK);
             }
         } else {
             observation = "Tool extraction failed due to invalid JSON_BLOB. Retry with correct JSON_BLOB.";
@@ -204,6 +216,8 @@ class Executor {
                 'error: parsedOutput,
                 observation: observation.toString()
             };
+            // span.addTag("error.type", parsedOutput);
+            // span.close(observe:ERROR);
         }
         self.update({
             llmResponse,
