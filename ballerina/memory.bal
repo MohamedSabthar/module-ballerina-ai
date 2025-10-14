@@ -60,7 +60,8 @@ public isolated class MessageWindowChatMemory {
             self.createSessionIfNotExist(sessionId);
             MemoryChatMessage[] memory = self.sessions.get(sessionId);
             if self.systemMessageSessions.hasKey(sessionId) {
-                memory.unshift(self.systemMessageSessions.get(sessionId).clone());
+                MemoryChatMessage[] updatedMemory = [self.systemMessageSessions.get(sessionId), ...memory];
+                return updatedMemory.clone();
             }
             return memory.clone();
         }
@@ -75,15 +76,22 @@ public isolated class MessageWindowChatMemory {
         readonly & MemoryChatMessage newMessage = check self.mapToMemoryChatMessage(message);
         lock {
             self.createSessionIfNotExist(sessionId);
-            MemoryChatMessage[] memory = self.sessions.get(sessionId);
-            if memory.length() >= self.size - 1 {
-                _ = memory.shift();
-            }
-            if newMessage is MemoryChatSystemMessage {
-                self.systemMessageSessions[sessionId] = newMessage;
+            if self.handleSystemMessage(sessionId, newMessage) {
                 return;
             }
+
+            MemoryChatMessage[] memory = self.sessions.get(sessionId);
             memory.push(newMessage);
+        }
+    }
+
+    isolated function handleSystemMessage(string sessionId, readonly & MemoryChatMessage message) returns boolean {
+        lock {
+            if message is MemoryChatSystemMessage {
+                self.systemMessageSessions[sessionId] = message;
+                return true;
+            }
+            return false;
         }
     }
 
