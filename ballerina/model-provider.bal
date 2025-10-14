@@ -15,8 +15,9 @@
 // under the License.
 
 import ai.intelligence;
-import ballerina/jballerina.java;
 import ai.observe;
+
+import ballerina/jballerina.java;
 
 # Roles for the chat messages.
 public enum ROLE {
@@ -116,7 +117,7 @@ public type ModelProvider distinct isolated client object {
     # + return - Function to be called, chat response or an error in-case of failures
     isolated remote function chat(ChatMessage[]|ChatUserMessage messages, ChatCompletionFunctions[] tools = [], string? stop = ())
         returns ChatAssistantMessage|Error;
-    
+
     # Sends a chat request to the model and generates a value that belongs to the type
     # corresponding to the type descriptor argument.
     #
@@ -195,29 +196,18 @@ public isolated distinct client class Wso2ModelProvider {
     # + return - Function to be called, chat response or an error in-case of failures
     isolated remote function chat(ChatMessage[]|ChatUserMessage messages, ChatCompletionFunctions[] tools, string? stop = ())
     returns ChatAssistantMessage|Error {
-        observe:Span span = new observe:SpanImp("chat" + " " + "gpt-4o"); // confirm the model name of inteligence ep
-        span.addTag("gen_ai.operation.name", "chat"); // chat, text_completion, generate_content
-        span.addTag("gen_ai.provider.name", "Ballerina"); // confirm provider
-        span.addTag("gen_ai.conversation.id", ""); // check how to pass the agent session id here
+        observe:Span span = new observe:SpanImp("chat gpt-4o"); // confirm the model name of inteligence ep
+        span.addTag("gen_ai.operation.name", "chat");
+        span.addTag("gen_ai.provider.name", "Ballerina");
         span.addTag("gen_ai.output.type", "text");
-        // gen_ai.request.choice.count
-        span.addTag("gen_ai.request.model" , "gpt-4o"); // confirm the model name of inteligence ep
-        // gen_ai.request.seed
-        // gen_ai.request.frequency_penalty
-        span.addTag("gen_ai.request.max_tokens", ""); // max token missing here
-        // gen_ai.request.presence_penalty
+        span.addTag("gen_ai.request.model", "gpt-4o"); // confirm the model name of inteligence ep
         if stop is string {
-        span.addTag("gen_ai.request.stop_sequences", stop);
+            span.addTag("gen_ai.request.stop_sequences", stop);
         }
         span.addTag("gen_ai.request.temperature", self.temperature);
-        span.addTag("gen_ai.request.top_k", ""); // top_k missing here
-        span.addTag("gen_ai.request.top_p", ""); // top_p missing here
-        // gen_ai.response.finish_reasons
         // gen_ai.response.id
         span.addTag("gen_ai.response.model", "gpt-4o"); // confirm the model name of inteligence ep
-        // gen_ai.usage.input_tokens
-        // gen_ai.usage.output_tokens
-        span.addTag("gen_ai.input.messages", convertMessageToAnydata(messages)); // TODO: handle ai:Prompt object
+        span.addTag("gen_ai.input.messages", convertMessageToAnydata(messages));
         intelligence:CreateChatCompletionRequest request = {
             stop,
             messages: self.mapToChatCompletionRequestMessage(messages),
@@ -243,15 +233,13 @@ public isolated distinct client class Wso2ModelProvider {
             chatAssistantMessage.toolCalls = [check self.mapToFunctionCall(functionCall)];
         }
         span.addTag("gen_ai.output.messages", chatAssistantMessage);
-        // gen_ai.system_instructions
         span.close(observe:OK);
         return chatAssistantMessage;
     }
 
-
     # Sends a chat request to the model and generates a value that belongs to the type
     # corresponding to the type descriptor argument.
-    # 
+    #
     # + prompt - The prompt to use in the chat messages
     # + td - Type descriptor specifying the expected return type format
     # + return - Generates a value that belongs to the type, or an error if generation fails
@@ -310,14 +298,6 @@ public isolated distinct client class Wso2ModelProvider {
         role: message.role,
         "content": getChatMessageStringContent(message.content)
     };
-
-    public isolated function getModelName() returns string {
-        return "gpt-4o";
-    }
-
-    public isolated function getProviderrName() returns string {
-        return "wso2";
-    }
 }
 
 isolated function convertMessageToAnydata(ChatMessage[]|ChatMessage messages) returns anydata {
