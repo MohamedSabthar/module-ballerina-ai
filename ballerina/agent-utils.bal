@@ -174,17 +174,18 @@ class Executor {
 
         anydata observation;
         ExecutionResult|ExecutionError executionResult;
-        
         if parsedOutput is LlmToolResponse {
-            observe:Span span = new observe:SpanImp("execute_tool " + parsedOutput.name);
+            observe:Span span = new observe:SpanImp("execute_tool " + (parsedOutput is LlmToolResponse ? parsedOutput.name : "unknown_tool"));
             span.addTag("gen_ai.operation.name", "execute_tool");
-            span.addTag("gen_ai.tool.call.id", parsedOutput.id ?: "not_available"); // TODO: generate an id if not available
-            // span.addTag("gen_ai.tool.description", "") // TODO: add tool description
-            span.addTag("gen_ai.tool.name", parsedOutput.name);
+            string? toolCallId = parsedOutput.id;
+            if toolCallId is string {
+                span.addTag("gen_ai.tool.call.id", toolCallId);
+            }
+            string toolName = parsedOutput.name;
+            span.addTag("gen_ai.tool.name", toolName);
+            span.addTag("gen_ai.tool.description", self.agent.toolStore.getToolDescription(toolName));
             span.addTag("gen_ai.tool.type", "function");
-            span.addTag("gen_ai.input.messages", []);
-
-            // gen_ai.system_instructions, gen_ai.input.messages, gen_ai.output.messages // TODO: check compliance requirements
+            span.addTag("gen_ai.tool.arguments", parsedOutput.arguments); // Added by us not mandated by spec
             ToolOutput|ToolExecutionError|LlmInvalidGenerationError output = self.agent.toolStore.execute(parsedOutput,
                 self.progress.context);
             if output is Error {
@@ -200,6 +201,8 @@ class Executor {
                     'error: output,
                     observation: observation.toString()
                 };
+                span.addTag("error.type", parsedOutput);
+                span.close(observe:ERROR);
             } else {
                 anydata|error value = output.value;
                 observation = value is error ? value.toString() : value;
@@ -207,6 +210,7 @@ class Executor {
                     tool: parsedOutput,
                     observation: value
                 };
+                span.addTag("gen_ai.tool.output", observation);
                 span.close(observe:OK);
             }
         } else {
@@ -216,8 +220,6 @@ class Executor {
                 'error: parsedOutput,
                 observation: observation.toString()
             };
-            // span.addTag("error.type", parsedOutput);
-            // span.close(observe:ERROR);
         }
         self.update({
             llmResponse,

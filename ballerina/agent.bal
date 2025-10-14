@@ -91,10 +91,8 @@ public isolated distinct class Agent {
         observe:Span span = new observe:SpanImp(string `create_agent ${self.systemPrompt.role}`);
         span.addTag("gen_ai.operation.name", "create_agent");
         span.addTag("gen_ai.provider.name", "Ballerina"); 
-        // span.addTag("gen_ai.agent.description", self.systemPrompt.instructions); // No need
         span.addTag("gen_ai.agent.id", self.uniqueId);
         span.addTag("gen_ai.agent.name", self.systemPrompt.role);
-        // "gen_ai.request.model"
         span.addTag("gen_ai.system_instructions", getFomatedSystemPrompt(self.systemPrompt));
         if functionCallAgent is Error {
             span.addTag("error.type", functionCallAgent); // what is the standard way?
@@ -117,33 +115,17 @@ public isolated distinct class Agent {
         observe:Span span = new observe:SpanImp(string `invoke_agent ${self.systemPrompt.role}`);
         span.addTag("gen_ai.operation.name", "invoke_agent");
         span.addTag("gen_ai.provider.name", "Ballerina");
-        // span.addTag("gen_ai.agent.description", self.systemPrompt.instructions); // may not need
         span.addTag("gen_ai.agent.id", self.uniqueId);
         span.addTag("gen_ai.agent.name", self.systemPrompt.role);
         span.addTag("gen_ai.conversation.id", sessionId);
-        //gen_ai.data_source.id
         span.addTag("gen_ai.output.type", "text");
-        // gen_ai.request.choice.count
-        // "gen_ai.request.model"
-        // gen_ai.request.seed
-        // gen_ai.request.frequency_penalty
-        // gen_ai.request.max_tokens
-        // gen_ai.request.presence_penalty
-        // gen_ai.request.stop_sequences
-        // gen_ai.request.temperature
-        // gen_ai.request.top_p
-        // gen_ai.response.finish_reasons
-        // gen_ai.response.id
-        // gen_ai.response.model
-        // gen_ai.usage.input_tokens
-        // gen_ai.usage.output_tokens
-     
-        // gen_ai.output.messages // have set it above self.modelProvider->chat()
+        span.addTag("gen_ai.input.messages", query);
         span.addTag("gen_ai.system_instructions", getFomatedSystemPrompt(self.systemPrompt));
         ExecutionTrace result = self.functionCallAgent.run(query, getFomatedSystemPrompt(self.systemPrompt),
             self.maxIter, self.verbose, sessionId, context);
         string? answer = result.answer;
         if answer is string {
+            span.addTag("gen_ai.output.messages", answer);
             span.close(observe:OK);
             return answer;
         }

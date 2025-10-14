@@ -135,6 +135,13 @@ public isolated class ToolStore {
         }
         return {value: observation};
     }
+
+    isolated function getToolDescription(string toolName) returns string? {
+        if self.tools.hasKey(toolName) {
+            return self.tools.get(toolName).description;
+        }
+        return;
+    }
 }
 
 isolated function getToolConfig(FunctionTool tool) returns ToolConfig|Error {
