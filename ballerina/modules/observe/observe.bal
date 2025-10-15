@@ -13,18 +13,18 @@ public type AiSpan isolated object {
     public isolated function close(Status status);
 };
 
+# Description.
 public isolated class SpanImp {
     *AiSpan;
     private final int|error spanId;
 
     public isolated function init(string name) {
+        if !observe:isTracingEnabled() {
+            return;
+        }
         int|error spanId = observe:startSpan(name);
-        map<string> ctx = observe:getSpanContext();
-        string? internalSpanId = ctx["spanId"];
         lock {
-            if internalSpanId is string {
-                aiSpans[internalSpanId] = self;
-            }
+            aiSpans[getUniqueSpanId()] = self;
         }
 
         if spanId is error {
@@ -35,6 +35,9 @@ public isolated class SpanImp {
     }
 
     public isolated function addTag(string key, anydata|error value) {
+        if !observe:isTracingEnabled() {
+            return;
+        }
         int|error spanId = self.spanId;
         if spanId is error {
             log:printError("attempted to add a tag to an invalid span", 'error = spanId);
@@ -42,17 +45,16 @@ public isolated class SpanImp {
         }
         error? result = observe:addTagToSpan(key, value is error ? value.toString() : value is string ? value : value.toJsonString(), spanId);
         if result is error {
-            log:printError(string `faliled to add tag '${key}' to span with ID '${spanId}'`, 'error = result);
+            log:printError(string `failed to add tag '${key}' to span with ID '${spanId}'`, 'error = result);
         }
     }
 
     public isolated function close(Status status) {
-        map<string> ctx = observe:getSpanContext();
-        string? internalSpanId = ctx.get("spanId");
+        if !observe:isTracingEnabled() {
+            return;
+        }
         lock {
-            if internalSpanId is string {
-                _ = aiSpans.remove(internalSpanId);
-            }
+            _ = aiSpans.remove(getUniqueSpanId());
         }
         int|error spanId = self.spanId;
         if spanId is error {
@@ -68,6 +70,9 @@ public isolated class SpanImp {
 }
 
 public isolated function getCurrentAiSpan() returns AiSpan? {
+    if !observe:isTracingEnabled() {
+        return;
+    }
     map<string> ctx = observe:getSpanContext();
     string? internalSpanId = ctx.get("spanId");
     if internalSpanId is () {
@@ -76,4 +81,9 @@ public isolated function getCurrentAiSpan() returns AiSpan? {
     lock {
         return aiSpans.get(internalSpanId);
     }
+}
+
+isolated function getUniqueSpanId() returns string {
+    map<string> ctx = observe:getSpanContext();
+    return ctx.get("spanId") + ctx.get("traceId");
 }
