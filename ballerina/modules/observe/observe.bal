@@ -54,23 +54,31 @@ public isolated class SpanImp {
             return;
         }
         lock {
-            _ = aiSpans.remove(getUniqueSpanId());
-        }
-        if 'error is () {
-            self.addTag("otel.status_code", OK);
-            return;
+            removeCurrentAiSpan();
         }
         int|error spanId = self.spanId;
         if spanId is error {
             log:printError("attempted to close an invalid span", 'error = spanId);
             return;
         }
+        if 'error is () {
+            self.addTag("otel.status_code", OK);
+            finishSpan(spanId);
+            return;
+        }
         self.addTag("error.type", 'error.toString());
         self.addTag("otel.status_code", ERROR);
-        error? result = observe:finishSpan(spanId);
-        if result is error {
-            log:printError(string `failed to close span with ID '${spanId}'`, 'error = result);
-        }
+        finishSpan(spanId);
+    }
+}
+
+isolated function finishSpan(int spanId) {
+    if !observe:isTracingEnabled() {
+        return;
+    }
+    error? result = observe:finishSpan(spanId);
+    if result is error {
+        log:printError(string `failed to close span with ID '${spanId}'`, 'error = result);
     }
 }
 
@@ -85,5 +93,17 @@ public isolated function getCurrentAiSpan() returns AiSpan? {
 
 isolated function getUniqueSpanId() returns string {
     map<string> ctx = observe:getSpanContext();
-    return ctx.get("spanId") + ":" +ctx.get("traceId");
+    return ctx.get("spanId") + ":" + ctx.get("traceId");
+}
+
+isolated function removeCurrentAiSpan() {
+    if !observe:isTracingEnabled() {
+        return;
+    }
+    lock {
+        string uniqueSpanId = getUniqueSpanId();
+        if aiSpans.hasKey(uniqueSpanId) {
+            _ = aiSpans.remove(uniqueSpanId);
+        }
+    }
 }
