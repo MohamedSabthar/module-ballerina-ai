@@ -20,11 +20,12 @@ public isolated class SpanImp {
     public isolated function init(string name) {
         int|error spanId = observe:startSpan(name);
         map<string> ctx = observe:getSpanContext();
-        string internalSpanId = ctx.get("spanId");
+        string? internalSpanId = ctx["spanId"];
         lock {
-            aiSpans[internalSpanId] = self;
+            if internalSpanId is string {
+                aiSpans[internalSpanId] = self;
+            }
         }
-
 
         if spanId is error {
             log:printError("failed to start span", 'error = spanId);
@@ -46,6 +47,13 @@ public isolated class SpanImp {
     }
 
     public isolated function close(Status status) {
+        map<string> ctx = observe:getSpanContext();
+        string? internalSpanId = ctx.get("spanId");
+        lock {
+            if internalSpanId is string {
+                _ = aiSpans.remove(internalSpanId);
+            }
+        }
         int|error spanId = self.spanId;
         if spanId is error {
             log:printError("attempted to close an invalid span", 'error = spanId);
