@@ -14,6 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import ai.observe;
+
+import ballerina/uuid;
+
 const INFER_TOOL_COUNT = "INFER_TOOL_COUNT";
 
 # Represents the system prompt given to the agent.
@@ -74,6 +78,7 @@ public isolated distinct class Agent {
     private final int maxIter;
     private final readonly & SystemPrompt systemPrompt;
     private final boolean verbose;
+    private final string uniqueId = uuid:createRandomUuid();
 
     # Initialize an Agent.
     #
@@ -83,7 +88,21 @@ public isolated distinct class Agent {
         self.maxIter = maxIter is INFER_TOOL_COUNT ? config.tools.length() + 1 : maxIter;
         self.verbose = config.verbose;
         self.systemPrompt = config.systemPrompt.cloneReadOnly();
-        self.functionCallAgent = check new FunctionCallAgent(config.model, config.tools, config.memory);
+        FunctionCallAgent|Error functionCallAgent = new (config.model, config.tools, config.memory);
+        // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/#create-agent-span
+        observe:AiSpan span = new observe:SpanImp(string `create_agent ${self.systemPrompt.role}`);
+        span.addTag("gen_ai.operation.name", "create_agent");
+        span.addTag("gen_ai.provider.name", "Ballerina");
+        span.addTag("gen_ai.agent.id", self.uniqueId);
+        span.addTag("gen_ai.agent.name", self.systemPrompt.role);
+        span.addTag("gen_ai.system_instructions", getFomatedSystemPrompt(self.systemPrompt));
+        if functionCallAgent is Error {
+            span.close(functionCallAgent); // what is the standard way?
+            return functionCallAgent;
+        }
+        self.functionCallAgent = functionCallAgent;
+        span.addTag("gen_ai.agent.tools", functionCallAgent.toolStore.getToolsInfo()); // Added by us not mandated by spec
+        span.close();
     }
 
     # Executes the agent for a given user query.
@@ -95,13 +114,27 @@ public isolated distinct class Agent {
     public isolated function run(@display {label: "Query"} string query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new) returns string|Error {
+        // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/#invoke-agent-span
+        observe:AiSpan span = new observe:SpanImp(string `invoke_agent ${self.systemPrompt.role}`);
+        span.addTag("gen_ai.operation.name", "invoke_agent");
+        span.addTag("gen_ai.provider.name", "Ballerina");
+        span.addTag("gen_ai.agent.id", self.uniqueId);
+        span.addTag("gen_ai.agent.name", self.systemPrompt.role);
+        span.addTag("gen_ai.conversation.id", sessionId);
+        span.addTag("gen_ai.output.type", "text");
+        span.addTag("gen_ai.input.messages", query);
+        span.addTag("gen_ai.system_instructions", getFomatedSystemPrompt(self.systemPrompt));
         ExecutionTrace result = self.functionCallAgent.run(query, getFomatedSystemPrompt(self.systemPrompt),
             self.maxIter, self.verbose, sessionId, context);
         string? answer = result.answer;
         if answer is string {
+            span.addTag("gen_ai.output.messages", answer);
+            span.close();
             return answer;
         }
-        return constructError(result.steps, self.maxIter);
+        Error err = constructError(result.steps, self.maxIter);
+        span.close(err);
+        return err;
     }
 }
 
