@@ -261,11 +261,29 @@ isolated function getLlMResponse(intelligence:Client llmClient,
         intelligence:ChatCompletionResponseMessage message?;
     }[] choices = response.choices;
 
+    string? responseId = response["id"];
+    if responseId is string {
+        span.addTag("gen_ai.response.id", responseId);
+    }
+    int? inputTokens = response.usage?.promptTokens;
+    if inputTokens is int {
+        span.addTag("gen_ai.usage.input_tokens", inputTokens);
+    }
+    int? outputTokens = response.usage?.completionTokens;
+    if outputTokens is int {
+        span.addTag("gen_ai.usage.output_tokens", outputTokens);
+    }
+
     if choices.length() == 0 {
         Error err = error("No completion choices");
         span.addTag("error.type", err);
         span.close(observe:ERROR);
         return err;
+    }
+
+    string? finishReason = choices[0].finishReason;
+    if finishReason is string {
+        span.addTag("gen_ai.response.finish_reasons", [finishReason]);
     }
 
     intelligence:ChatCompletionResponseMessage? message = choices[0].message;
