@@ -73,13 +73,8 @@ public isolated function getCurrentAiSpan() returns AiSpan? {
     if !observe:isTracingEnabled() {
         return;
     }
-    map<string> ctx = observe:getSpanContext();
-    string? internalSpanId = ctx.get("spanId");
-    if internalSpanId is () {
-        return;
-    }
     lock {
-        return aiSpans.get(internalSpanId);
+        return aiSpans.get(getUniqueSpanId());
     }
 }
 
