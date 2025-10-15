@@ -14,8 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import ai.observe;
+
 import ballerina/log;
-import ballerina/observe;
 
 # Function call agent. 
 # This agent uses OpenAI function call API to perform the tool selection.
@@ -83,15 +84,17 @@ isolated distinct class FunctionCallAgent {
         // Currently, tool calls are executed sequentially in separate chat responses.  
         // Update the logic to execute all tool calls together and return a single response.
         ChatCompletionFunctions[] chatCompletionFunctions = from Tool tool in self.toolStore.tools.toArray()
-        select {
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.variables
-        };
-        // The following line should be added to the invoke_agent span
-        checkpanic observe:addTagToSpan("gen_ai.input.messages", convertMessageToAnydata(messages).toJsonString());
+            select {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.variables
+            };
         ChatAssistantMessage response = check self.model->chat(messages, tools = chatCompletionFunctions);
-        checkpanic observe:addTagToSpan("gen_ai.output.messages", convertMessageToAnydata(response).toJsonString());
+        observe:AiSpan? currentSpan = observe:getCurrentAiSpan();
+        if currentSpan is observe:AiSpan {
+            currentSpan.addTag("gen_ai.input.messages", convertMessageToAnydata(messages).toJsonString());
+            currentSpan.addTag("gen_ai.output.messages", convertMessageToAnydata(response).toJsonString());
+        }
         FunctionCall[]? toolCalls = response?.toolCalls;
         return toolCalls is FunctionCall[] ? toolCalls[0] : response?.content;
     }

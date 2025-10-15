@@ -196,17 +196,16 @@ public isolated distinct client class Wso2ModelProvider {
     # + return - Function to be called, chat response or an error in-case of failures
     isolated remote function chat(ChatMessage[]|ChatUserMessage messages, ChatCompletionFunctions[] tools, string? stop = ())
     returns ChatAssistantMessage|Error {
-        observe:Span span = new observe:SpanImp("chat gpt-4o"); // confirm the model name of inteligence ep
+        observe:AiSpan span = new observe:SpanImp("chat gpt-4o-mini");
         span.addTag("gen_ai.operation.name", "chat");
         span.addTag("gen_ai.provider.name", "Ballerina");
         span.addTag("gen_ai.output.type", "text");
-        span.addTag("gen_ai.request.model", "gpt-4o"); // confirm the model name of inteligence ep
+        span.addTag("gen_ai.request.model", "gpt-4o-mini");
         if stop is string {
             span.addTag("gen_ai.request.stop_sequences", stop);
         }
         span.addTag("gen_ai.request.temperature", self.temperature);
-        // gen_ai.response.id
-        span.addTag("gen_ai.response.model", "gpt-4o"); // confirm the model name of inteligence ep
+        span.addTag("gen_ai.response.model", "gpt-4o-mini");
         span.addTag("gen_ai.input.messages", convertMessageToAnydata(messages));
         intelligence:CreateChatCompletionRequest request = {
             stop,
@@ -226,7 +225,22 @@ public isolated distinct client class Wso2ModelProvider {
             return error LlmInvalidResponseError("Empty response from the model when using function call API");
         }
         intelligence:ChatCompletionResponseMessage? message = response.choices[0].message;
-
+        string? finishReason = response.choices[0].finishReason;
+        int? inputTokens = response.usage?.promptTokens;
+        int? outputTokens = response.usage?.completionTokens;
+        string|int? responseId = response["id"];
+        if responseId is string {
+            span.addTag("gen_ai.response.id", responseId);
+        }
+        if inputTokens is int {
+            span.addTag("gen_ai.usage.input_tokens", inputTokens);
+        }
+        if outputTokens is int {
+            span.addTag("gen_ai.usage.output_tokens", outputTokens);
+        }
+        if finishReason is string {
+            span.addTag("gen_ai.response.finish_reasons", [finishReason]);
+        }
         ChatAssistantMessage chatAssistantMessage = {role: ASSISTANT, content: message?.content};
         intelligence:ChatCompletionFunctionCall? functionCall = message?.functionCall;
         if functionCall is intelligence:ChatCompletionFunctionCall {
@@ -301,23 +315,12 @@ public isolated distinct client class Wso2ModelProvider {
 }
 
 isolated function convertMessageToAnydata(ChatMessage[]|ChatMessage messages) returns anydata {
+    if messages is ChatMessage[] {
+        return messages.'map(msg => msg is ChatUserMessage|ChatSystemMessage ? convertMessageToAnydata(msg) : msg);
+    }
     if messages is ChatUserMessage|ChatSystemMessage {
-        return convertUserMessageToAnydata(messages);
-    }
-    if messages is ChatMessage {
-        return messages;
-    }
-    return messages.'map(msg => msg is ChatUserMessage|ChatSystemMessage ? convertUserMessageToAnydata(msg) : msg);
-}
 
-isolated function convertUserMessageToAnydata(ChatUserMessage|ChatSystemMessage message) returns anydata {
-    Prompt|string content = message.content;
-    if content is Prompt {
-        return {
-            role: message.role,
-            content: getChatMessageStringContent(message.content),
-            name: message.name
-        };
     }
-    return content;
+    return messages !is ChatUserMessage|ChatSystemMessage ? messages :
+        {role: messages.role, content: getChatMessageStringContent(messages.content), name: messages.name};
 }

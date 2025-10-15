@@ -14,9 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import ai.observe;
+
 import ballerina/io;
 import ballerina/log;
-import ai.observe;
 
 # Execution progress record
 type ExecutionProgress record {|
@@ -175,7 +176,8 @@ class Executor {
         anydata observation;
         ExecutionResult|ExecutionError executionResult;
         if parsedOutput is LlmToolResponse {
-            observe:Span span = new observe:SpanImp("execute_tool " + (parsedOutput is LlmToolResponse ? parsedOutput.name : "unknown_tool"));
+            // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/#execute-tool-span
+            observe:AiSpan span = new observe:SpanImp("execute_tool " + parsedOutput.name);
             span.addTag("gen_ai.operation.name", "execute_tool");
             string? toolCallId = parsedOutput.id;
             if toolCallId is string {
@@ -184,7 +186,7 @@ class Executor {
             string toolName = parsedOutput.name;
             span.addTag("gen_ai.tool.name", toolName);
             span.addTag("gen_ai.tool.description", self.agent.toolStore.getToolDescription(toolName));
-            span.addTag("gen_ai.tool.type", "function");
+            span.addTag("gen_ai.tool.type", self.agent.toolStore.isMcpTool(toolName) ? "extension" : "function");
             span.addTag("gen_ai.tool.arguments", parsedOutput.arguments); // Added by us not mandated by spec
             ToolOutput|ToolExecutionError|LlmInvalidGenerationError output = self.agent.toolStore.execute(parsedOutput,
                 self.progress.context);
@@ -210,7 +212,7 @@ class Executor {
                     tool: parsedOutput,
                     observation: value
                 };
-                span.addTag("gen_ai.tool.output", observation);
+                span.addTag("gen_ai.tool.output", observation); // Added by us not mandated by spec
                 span.close(observe:OK);
             }
         } else {

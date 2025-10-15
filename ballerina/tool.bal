@@ -101,7 +101,7 @@ public isolated class ToolStore {
         isolated function caller = self.tools.get(name).caller;
         ToolExecutionResult|error execution;
         lock {
-            readonly & map<json> toolInput = self.mcpTools.hasKey(name)
+            readonly & map<json> toolInput = self.isMcpTool(name)
                 ? {params: {name, arguments: inputValues}}.cloneReadOnly()
                 : inputValues.cloneReadOnly();
             execution = trap executeTool(caller, toolInput, context);
@@ -142,6 +142,12 @@ public isolated class ToolStore {
         }
         return;
     }
+
+    isolated function isMcpTool(string toolName) returns boolean {
+        lock {
+            return self.mcpTools.hasKey(toolName);
+        }
+    }
 }
 
 isolated function getToolConfig(FunctionTool tool) returns ToolConfig|Error {
@@ -178,7 +184,7 @@ public isolated function executeTool(FunctionTool tool, map<json> llmToolInput, 
     return {result};
 }
 
-isolated function getInputArgumentsOfTool(FunctionTool tool, map<json> inputValues, Context context = new) 
+isolated function getInputArgumentsOfTool(FunctionTool tool, map<json> inputValues, Context context = new)
     returns (anydata|Context)[]|error {
     map<anydata> inputArgs = {};
     boolean hasContextArg = false;

@@ -87,8 +87,8 @@ public isolated distinct class Agent {
         self.verbose = config.verbose;
         self.systemPrompt = config.systemPrompt.cloneReadOnly();
         FunctionCallAgent|Error functionCallAgent = new (config.model, config.tools, config.memory);
-
-        observe:Span span = new observe:SpanImp(string `create_agent ${self.systemPrompt.role}`);
+        // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/#create-agent-span
+        observe:AiSpan span = new observe:SpanImp(string `create_agent ${self.systemPrompt.role}`);
         span.addTag("gen_ai.operation.name", "create_agent");
         span.addTag("gen_ai.provider.name", "Ballerina"); 
         span.addTag("gen_ai.agent.id", self.uniqueId);
@@ -112,7 +112,8 @@ public isolated distinct class Agent {
     public isolated function run(@display {label: "Query"} string query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new) returns string|Error {
-        observe:Span span = new observe:SpanImp(string `invoke_agent ${self.systemPrompt.role}`);
+        // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/#invoke-agent-span
+        observe:AiSpan span = new observe:SpanImp(string `invoke_agent ${self.systemPrompt.role}`);
         span.addTag("gen_ai.operation.name", "invoke_agent");
         span.addTag("gen_ai.provider.name", "Ballerina");
         span.addTag("gen_ai.agent.id", self.uniqueId);

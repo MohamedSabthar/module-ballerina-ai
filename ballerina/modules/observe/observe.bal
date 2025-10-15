@@ -1,22 +1,30 @@
 import ballerina/log;
 import ballerina/observe;
 
+final isolated map<AiSpan> aiSpans = {};
+
 public enum Status {
     OK = "Ok",
     ERROR = "Error"
 }
 
-public type Span isolated object {
+public type AiSpan isolated object {
     public isolated function addTag(string key, anydata|error value);
     public isolated function close(Status status);
 };
 
 public isolated class SpanImp {
-    *Span;
+    *AiSpan;
     private final int|error spanId;
 
     public isolated function init(string name) {
         int|error spanId = observe:startSpan(name);
+        map<string> ctx = observe:getSpanContext();
+        string internalSpanId = ctx.get("spanId");
+        lock {
+            aiSpans[internalSpanId] = self;
+        }
+
 
         if spanId is error {
             log:printError("failed to start span", 'error = spanId);
@@ -48,5 +56,16 @@ public isolated class SpanImp {
         if result is error {
             log:printError(string `failed to close span with ID '${spanId}'`, 'error = result);
         }
+    }
+}
+
+public isolated function getCurrentAiSpan() returns AiSpan? {
+    map<string> ctx = observe:getSpanContext();
+    string? internalSpanId = ctx.get("spanId");
+    if internalSpanId is () {
+        return;
+    }
+    lock {
+        return aiSpans.get(internalSpanId);
     }
 }
