@@ -15,6 +15,7 @@
 // under the License.
 
 import ai.intelligence;
+import ai.observe;
 
 import ballerina/constraint;
 import ballerina/data.jsondata;
@@ -209,14 +210,15 @@ isolated function generateLlmResponse(intelligence:Client llmClient, decimal tem
         GeneratorConfig generatorConfig, Prompt prompt,
         typedesc<json> expectedResponseTypedesc) returns anydata|Error {
     DocumentContentPart[] content = check generateChatCreationContent(prompt);
+
     ResponseSchema responseSchema = check getExpectedResponseSchema(expectedResponseTypedesc);
     intelligence:ChatCompletionTool[]|error tools = getGetResultsTool(responseSchema.schema);
     if tools is error {
         return error("Error in generated schema: " + tools.message());
     }
-
+    intelligence:ChatCompletionRequestMessage[] messages = [{role: USER, "content": content}];
     intelligence:CreateChatCompletionRequest request = {
-        messages: [{role: USER, "content": content}],
+        messages,
         tools,
         toolChoice: getGetResultsToolChoice(),
         temperature
@@ -232,9 +234,23 @@ isolated function getLlMResponse(intelligence:Client llmClient,
         intelligence:CreateChatCompletionRequest request,
         typedesc<anydata> expectedResponseTypedesc,
         boolean isOriginallyJsonObject, int retryCount, decimal retryInterval) returns anydata|Error {
+    // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/#spans
+    observe:AiSpan span = new observe:SpanImp("generate_content gpt-4o-mini");
+    span.addTag("gen_ai.operation.name", "generate_content");
+    span.addTag("gen_ai.provider.name", "WSO2");
+    span.addTag("gen_ai.output.type", "json");
+    span.addTag("gen_ai.request.model", "gpt-4o-mini");
+    decimal? temperature = request?.temperature;
+    if temperature is decimal {
+        span.addTag("gen_ai.request.temperature", temperature);
+    }
+    span.addTag("gen_ai.response.model", "gpt-4o-mini");
+    span.addTag("gen_ai.input.messages", request.messages);
     intelligence:CreateChatCompletionResponse|error response = llmClient->/chat/completions.post(request);
     if response is error {
-        return error("LLM call failed: " + response.message(), detail = response.detail(), cause = response.cause());
+        Error err = error("LLM call failed: " + response.message(), detail = response.detail(), cause = response.cause());
+        span.close(err);
+        return err;
     }
 
     record {
@@ -244,21 +260,45 @@ isolated function getLlMResponse(intelligence:Client llmClient,
         intelligence:ChatCompletionResponseMessage message?;
     }[] choices = response.choices;
 
+    string? responseId = response["id"];
+    if responseId is string {
+        span.addTag("gen_ai.response.id", responseId);
+    }
+    int? inputTokens = response.usage?.promptTokens;
+    if inputTokens is int {
+        span.addTag("gen_ai.usage.input_tokens", inputTokens);
+    }
+    int? outputTokens = response.usage?.completionTokens;
+    if outputTokens is int {
+        span.addTag("gen_ai.usage.output_tokens", outputTokens);
+    }
+
     if choices.length() == 0 {
-        return error("No completion choices");
+        Error err = error("No completion choices");
+        span.close(err);
+        return err;
+    }
+
+    string? finishReason = choices[0].finishReason;
+    if finishReason is string {
+        span.addTag("gen_ai.response.finish_reasons", [finishReason]);
     }
 
     intelligence:ChatCompletionResponseMessage? message = choices[0].message;
     intelligence:ChatCompletionMessageToolCall[]? toolCalls = message?.toolCalls;
     if toolCalls is () || toolCalls.length() == 0 {
-        return error(NO_RELEVANT_RESPONSE_FROM_THE_LLM);
+        Error err = error(NO_RELEVANT_RESPONSE_FROM_THE_LLM);
+        span.close(err);
+        return err;
     }
 
     intelligence:ChatCompletionMessageToolCall tool = toolCalls[0];
     intelligence:ChatCompletionMessageToolCall_function func = tool.'function;
     map<json>|error arguments = func.arguments.fromJsonStringWithType();
     if arguments is error {
-        return error(NO_RELEVANT_RESPONSE_FROM_THE_LLM);
+        Error err = error(NO_RELEVANT_RESPONSE_FROM_THE_LLM);
+        span.close(err);
+        return err;
     }
 
     intelligence:ChatCompletionRequestMessage[] history = request.messages;
@@ -274,7 +314,9 @@ isolated function getLlMResponse(intelligence:Client llmClient,
     if result is error && retryCount > 0 {
         string|error repairMessage = getRepairMessage(result, toolId, functionName);
         if repairMessage is error {
-            return error("Failed to generate a valid response: " + repairMessage.message());
+            Error err = error("Failed to generate a valid response: " + repairMessage.message());
+            span.close(err);
+            return err;
         }
 
         history.push({
@@ -282,17 +324,21 @@ isolated function getLlMResponse(intelligence:Client llmClient,
             "content": repairMessage
         });
         runtime:sleep(retryInterval);
-
+        span.close(result);
         return getLlMResponse(llmClient, request, expectedResponseTypedesc, isOriginallyJsonObject,
                 retryCount - 1, retryInterval);
     }
 
     if result is anydata {
+        span.addTag("gen_ai.output.messages", result);
+        span.close();
         return result;
     }
 
-    return error LlmInvalidGenerationError(string `Invalid value returned from the LLM Client, expected: '${
+    Error err = error LlmInvalidGenerationError(string `Invalid value returned from the LLM Client, expected: '${
             expectedResponseTypedesc.toBalString()}', found '${result.toBalString()}'`);
+    span.close(err);
+    return err;
 }
 
 isolated function handleResponseWithExpectedType(map<json> arguments, boolean isOriginallyJsonObject,

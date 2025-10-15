@@ -15,6 +15,8 @@
 // under the License.
 
 import ai.intelligence;
+import ai.observe;
+
 import ballerina/jballerina.java;
 
 # Roles for the chat messages.
@@ -115,7 +117,7 @@ public type ModelProvider distinct isolated client object {
     # + return - Function to be called, chat response or an error in-case of failures
     isolated remote function chat(ChatMessage[]|ChatUserMessage messages, ChatCompletionFunctions[] tools = [], string? stop = ())
         returns ChatAssistantMessage|Error;
-    
+
     # Sends a chat request to the model and generates a value that belongs to the type
     # corresponding to the type descriptor argument.
     #
@@ -194,6 +196,18 @@ public isolated distinct client class Wso2ModelProvider {
     # + return - Function to be called, chat response or an error in-case of failures
     isolated remote function chat(ChatMessage[]|ChatUserMessage messages, ChatCompletionFunctions[] tools, string? stop = ())
     returns ChatAssistantMessage|Error {
+        observe:AiSpan span = new observe:SpanImp("chat gpt-4o-mini");
+        span.addTag("gen_ai.operation.name", "chat");
+        span.addTag("gen_ai.provider.name", "WSO2");
+        span.addTag("gen_ai.output.type", "text");
+        span.addTag("gen_ai.request.model", "gpt-4o-mini");
+        if stop is string {
+            span.addTag("gen_ai.request.stop_sequences", stop);
+        }
+        span.addTag("gen_ai.request.temperature", self.temperature);
+        span.addTag("gen_ai.response.model", "gpt-4o-mini");
+        span.addTag("gen_ai.input.messages", convertMessageToAnydata(messages));
+        span.addTag("gen_ai.input.tools", tools); // Added by us not mandated by spec
         intelligence:CreateChatCompletionRequest request = {
             stop,
             messages: self.mapToChatCompletionRequestMessage(messages),
@@ -204,24 +218,43 @@ public isolated distinct client class Wso2ModelProvider {
         }
         intelligence:CreateChatCompletionResponse|error response = self.llmClient->/chat/completions.post(request);
         if response is error {
-            return error LlmConnectionError("Error while connecting to the model", response);
+            Error err = error LlmConnectionError("Error while connecting to the model", response);
+            span.close(err);
+            return err;
         }
         if response.choices.length() == 0 {
             return error LlmInvalidResponseError("Empty response from the model when using function call API");
         }
         intelligence:ChatCompletionResponseMessage? message = response.choices[0].message;
+        string? finishReason = response.choices[0].finishReason;
+        int? inputTokens = response.usage?.promptTokens;
+        int? outputTokens = response.usage?.completionTokens;
+        string|int? responseId = response["id"];
+        if responseId is string {
+            span.addTag("gen_ai.response.id", responseId);
+        }
+        if inputTokens is int {
+            span.addTag("gen_ai.usage.input_tokens", inputTokens);
+        }
+        if outputTokens is int {
+            span.addTag("gen_ai.usage.output_tokens", outputTokens);
+        }
+        if finishReason is string {
+            span.addTag("gen_ai.response.finish_reasons", [finishReason]);
+        }
         ChatAssistantMessage chatAssistantMessage = {role: ASSISTANT, content: message?.content};
         intelligence:ChatCompletionFunctionCall? functionCall = message?.functionCall;
         if functionCall is intelligence:ChatCompletionFunctionCall {
             chatAssistantMessage.toolCalls = [check self.mapToFunctionCall(functionCall)];
         }
+        span.addTag("gen_ai.output.messages", chatAssistantMessage);
+        span.close();
         return chatAssistantMessage;
     }
 
-
     # Sends a chat request to the model and generates a value that belongs to the type
     # corresponding to the type descriptor argument.
-    # 
+    #
     # + prompt - The prompt to use in the chat messages
     # + td - Type descriptor specifying the expected return type format
     # + return - Generates a value that belongs to the type, or an error if generation fails
@@ -280,4 +313,15 @@ public isolated distinct client class Wso2ModelProvider {
         role: message.role,
         "content": getChatMessageStringContent(message.content)
     };
+}
+
+isolated function convertMessageToAnydata(ChatMessage[]|ChatMessage messages) returns anydata {
+    if messages is ChatMessage[] {
+        return messages.'map(msg => msg is ChatUserMessage|ChatSystemMessage ? convertMessageToAnydata(msg) : msg);
+    }
+    if messages is ChatUserMessage|ChatSystemMessage {
+
+    }
+    return messages !is ChatUserMessage|ChatSystemMessage ? messages :
+        {role: messages.role, content: getChatMessageStringContent(messages.content), name: messages.name};
 }
