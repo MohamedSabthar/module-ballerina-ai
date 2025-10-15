@@ -197,17 +197,17 @@ public isolated distinct client class Wso2ModelProvider {
     isolated remote function chat(ChatMessage[]|ChatUserMessage messages, ChatCompletionFunctions[] tools, string? stop = ())
     returns ChatAssistantMessage|Error {
         observe:AiSpan span = new observe:SpanImp("chat gpt-4o-mini");
-        span.addTag("gen_ai.operation.name", "chat");
-        span.addTag("gen_ai.provider.name", "WSO2");
-        span.addTag("gen_ai.output.type", "text");
-        span.addTag("gen_ai.request.model", "gpt-4o-mini");
+        span.addTag(observe:OPERATION_NAME, "chat");
+        span.addTag(observe:PROVIDER_NAME, "WSO2");
+        span.addTag(observe:OUTPUT_TYPE, "text");
+        span.addTag(observe:REQUEST_MODEL, "gpt-4o-mini");
         if stop is string {
             span.addTag("gen_ai.request.stop_sequences", stop);
         }
-        span.addTag("gen_ai.request.temperature", self.temperature);
-        span.addTag("gen_ai.response.model", "gpt-4o-mini");
-        span.addTag("gen_ai.input.messages", convertMessageToAnydata(messages));
-        span.addTag("gen_ai.input.tools", tools); // Added by us not mandated by spec
+        span.addTag(observe:TEMPERATURE, self.temperature);
+        span.addTag(observe:RESPONSE_MODEL, "gpt-4o-mini");
+        span.addTag(observe:INPUT_MESSAGES, convertMessageToAnydata(messages));
+        span.addTag(observe:INPUT_TOOLS, tools); // Added by us not mandated by spec
         intelligence:CreateChatCompletionRequest request = {
             stop,
             messages: self.mapToChatCompletionRequestMessage(messages),
@@ -247,7 +247,7 @@ public isolated distinct client class Wso2ModelProvider {
         if functionCall is intelligence:ChatCompletionFunctionCall {
             chatAssistantMessage.toolCalls = [check self.mapToFunctionCall(functionCall)];
         }
-        span.addTag("gen_ai.output.messages", chatAssistantMessage);
+        span.addTag(observe:OUTPUT_MESSAGES, chatAssistantMessage);
         span.close();
         return chatAssistantMessage;
     }

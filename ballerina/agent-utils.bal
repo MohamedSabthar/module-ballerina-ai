@@ -178,16 +178,16 @@ class Executor {
         if parsedOutput is LlmToolResponse {
             // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/#execute-tool-span
             observe:AiSpan span = new observe:SpanImp("execute_tool " + parsedOutput.name);
-            span.addTag("gen_ai.operation.name", "execute_tool");
+            span.addTag(observe:OPERATION_NAME, "execute_tool");
             string? toolCallId = parsedOutput.id;
             if toolCallId is string {
-                span.addTag("gen_ai.tool.call.id", toolCallId);
+                span.addTag(observe:TOOL_CALL_ID, toolCallId);
             }
             string toolName = parsedOutput.name;
-            span.addTag("gen_ai.tool.name", toolName);
-            span.addTag("gen_ai.tool.description", self.agent.toolStore.getToolDescription(toolName));
-            span.addTag("gen_ai.tool.type", self.agent.toolStore.isMcpTool(toolName) ? "extension" : "function");
-            span.addTag("gen_ai.tool.arguments", parsedOutput.arguments); // Added by us not mandated by spec
+            span.addTag(observe:TOOL_NAME, toolName);
+            span.addTag(observe:TOOL_DESCRIPTION, self.agent.toolStore.getToolDescription(toolName));
+            span.addTag(observe:TOOL_TYPE, self.agent.toolStore.isMcpTool(toolName) ? "extension" : "function");
+            span.addTag(observe:TOOL_ARGUMENTS, parsedOutput.arguments); // Added by us not mandated by spec
             ToolOutput|ToolExecutionError|LlmInvalidGenerationError output = self.agent.toolStore.execute(parsedOutput,
                 self.progress.context);
             if output is Error {
@@ -211,7 +211,7 @@ class Executor {
                     tool: parsedOutput,
                     observation: value
                 };
-                span.addTag("gen_ai.tool.output", observation); // Added by us not mandated by spec
+                span.addTag(observe:TOOL_OUTPUT, observation); // Added by us not mandated by spec
                 span.close();
             }
         } else {

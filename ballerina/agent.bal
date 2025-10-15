@@ -91,17 +91,17 @@ public isolated distinct class Agent {
         FunctionCallAgent|Error functionCallAgent = new (config.model, config.tools, config.memory);
         // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/#create-agent-span
         observe:AiSpan span = new observe:SpanImp(string `create_agent ${self.systemPrompt.role}`);
-        span.addTag("gen_ai.operation.name", "create_agent");
-        span.addTag("gen_ai.provider.name", "Ballerina");
-        span.addTag("gen_ai.agent.id", self.uniqueId);
-        span.addTag("gen_ai.agent.name", self.systemPrompt.role);
-        span.addTag("gen_ai.system_instructions", getFomatedSystemPrompt(self.systemPrompt));
+        span.addTag(observe:OPERATION_NAME, "create_agent");
+        span.addTag(observe:PROVIDER_NAME, "Ballerina");
+        span.addTag(observe:AGENT_ID, self.uniqueId);
+        span.addTag(observe:AGENT_NAME, self.systemPrompt.role);
+        span.addTag(observe:SYSTEM_INSTRUCTIONS, getFomatedSystemPrompt(self.systemPrompt));
         if functionCallAgent is Error {
             span.close(functionCallAgent); // what is the standard way?
             return functionCallAgent;
         }
         self.functionCallAgent = functionCallAgent;
-        span.addTag("gen_ai.agent.tools", functionCallAgent.toolStore.getToolsInfo()); // Added by us not mandated by spec
+        span.addTag(observe:AGENT_TOOLS, functionCallAgent.toolStore.getToolsInfo()); // Added by us not mandated by spec
         span.close();
     }
 
@@ -116,19 +116,19 @@ public isolated distinct class Agent {
             Context context = new) returns string|Error {
         // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/#invoke-agent-span
         observe:AiSpan span = new observe:SpanImp(string `invoke_agent ${self.systemPrompt.role}`);
-        span.addTag("gen_ai.operation.name", "invoke_agent");
-        span.addTag("gen_ai.provider.name", "Ballerina");
-        span.addTag("gen_ai.agent.id", self.uniqueId);
-        span.addTag("gen_ai.agent.name", self.systemPrompt.role);
-        span.addTag("gen_ai.conversation.id", sessionId);
-        span.addTag("gen_ai.output.type", "text");
-        span.addTag("gen_ai.input.messages", query);
-        span.addTag("gen_ai.system_instructions", getFomatedSystemPrompt(self.systemPrompt));
+        span.addTag(observe:OPERATION_NAME, "invoke_agent");
+        span.addTag(observe:PROVIDER_NAME, "Ballerina");
+        span.addTag(observe:AGENT_ID, self.uniqueId);
+        span.addTag(observe:AGENT_NAME, self.systemPrompt.role);
+        span.addTag(observe:CONVERSATION_ID, sessionId);
+        span.addTag(observe:OUTPUT_TYPE, "text");
+        span.addTag(observe:INPUT_MESSAGES, query);
+        span.addTag(observe:SYSTEM_INSTRUCTIONS, getFomatedSystemPrompt(self.systemPrompt));
         ExecutionTrace result = self.functionCallAgent.run(query, getFomatedSystemPrompt(self.systemPrompt),
             self.maxIter, self.verbose, sessionId, context);
         string? answer = result.answer;
         if answer is string {
-            span.addTag("gen_ai.output.messages", answer);
+            span.addTag(observe:OUTPUT_MESSAGES, answer);
             span.close();
             return answer;
         }

@@ -78,10 +78,10 @@ public distinct isolated client class Wso2EmbeddingProvider {
     isolated remote function embed(Chunk chunk) returns Embedding|Error {
         // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/#spans
         observe:AiSpan span = new observe:SpanImp("embeddings text-embedding-3-small");
-        span.addTag("gen_ai.operation.name", "embeddings");
-        span.addTag("gen_ai.provider.name", "WSO2");
-        span.addTag("gen_ai.request.model", "text-embedding-3-small");
-        span.addTag("gen_ai.response.model", "text-embedding-3-small");
+        span.addTag(observe:OPERATION_NAME, "embeddings");
+        span.addTag(observe:PROVIDER_NAME, "WSO2");
+        span.addTag(observe:REQUEST_MODEL, "text-embedding-3-small");
+        span.addTag(observe:RESPONSE_MODEL, "text-embedding-3-small");
 
         if chunk !is TextChunk|TextDocument {
             Error err = error Error("Unsupported chunk type. only 'ai:TextChunk|ai:TextDocument' is supported");
@@ -89,7 +89,7 @@ public distinct isolated client class Wso2EmbeddingProvider {
             return err;
         }
         intelligence:EmbeddingRequest request = {input: chunk.content};
-        span.addTag("gen_ai.input", chunk.content); // Added by us not mandated by spec
+        span.addTag(observe:INPUT_CONTENT, chunk.content); // Added by us not mandated by spec
         intelligence:EmbeddingResponse|error response = self.embeddingClient->/embeddings.post(request);
         if response is error {
             Error err = error Error("Error generating embedding for provided chunk", response);
@@ -98,7 +98,7 @@ public distinct isolated client class Wso2EmbeddingProvider {
         }
         int? inputTokens = response.usage?.promptTokens;
         if inputTokens is int {
-            span.addTag("gen_ai.usage.prompt_tokens", inputTokens);
+            span.addTag(observe:OUTPUT_TOKENS, inputTokens);
         }
         intelligence:EmbeddingResponse_data[] responseData = response.data;
         if responseData.length() == 0 {
@@ -116,17 +116,17 @@ public distinct isolated client class Wso2EmbeddingProvider {
     # + return - An array of embeddings on success, or an `ai:Error`
     isolated remote function batchEmbed(Chunk[] chunks) returns Embedding[]|Error {
         observe:AiSpan span = new observe:SpanImp("embeddings text-embedding-3-small");
-        span.addTag("gen_ai.operation.name", "embeddings");
-        span.addTag("gen_ai.provider.name", "WSO2");
-        span.addTag("gen_ai.request.model", "text-embedding-3-small");
-        span.addTag("gen_ai.response.model", "text-embedding-3-small");
+        span.addTag(observe:OPERATION_NAME, "embeddings");
+        span.addTag(observe:PROVIDER_NAME, "WSO2");
+        span.addTag(observe:REQUEST_MODEL, "text-embedding-3-small");
+        span.addTag(observe:RESPONSE_MODEL, "text-embedding-3-small");
         if !isAllTextChunks(chunks) {
             Error err = error Error("Unsupported chunk type. Expected elements of type 'ai:TextChunk|ai:TextDocument'.");
             span.close(err);
             return err;
         }
         string[] input = chunks.map(chunk => chunk.content.toString());
-        span.addTag("gen_ai.input", input); // Added by us not mandated by spec
+        span.addTag(observe:INPUT_CONTENT, input); // Added by us not mandated by spec
         intelligence:EmbeddingResponse|error response = self.embeddingClient->/embeddings.post({input});
         if response is error {
             return error Error("Error generating embedding for provided chunk", response);
@@ -134,7 +134,7 @@ public distinct isolated client class Wso2EmbeddingProvider {
         intelligence:EmbeddingResponse_data[] responseData = response.data;
         int? inputTokens = response.usage?.promptTokens;
         if inputTokens is int {
-            span.addTag("gen_ai.usage.prompt_tokens", inputTokens);
+            span.addTag(observe:OUTPUT_TOKENS, inputTokens);
         }
         if responseData.length() == 0 {
             Error err = error Error("No embeddings generated for the provided chunk");

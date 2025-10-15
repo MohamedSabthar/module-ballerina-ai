@@ -92,8 +92,8 @@ isolated distinct class FunctionCallAgent {
         ChatAssistantMessage response = check self.model->chat(messages, tools = chatCompletionFunctions);
         observe:AiSpan? currentSpan = observe:getCurrentAiSpan();
         if currentSpan is observe:AiSpan {
-            currentSpan.addTag("gen_ai.input.messages", convertMessageToAnydata(messages).toJsonString());
-            currentSpan.addTag("gen_ai.output.messages", convertMessageToAnydata(response).toJsonString());
+            currentSpan.addTag(observe:INPUT_MESSAGES, convertMessageToAnydata(messages).toJsonString());
+            currentSpan.addTag(observe:OUTPUT_MESSAGES, convertMessageToAnydata(response).toJsonString());
         }
         FunctionCall[]? toolCalls = response?.toolCalls;
         return toolCalls is FunctionCall[] ? toolCalls[0] : response?.content;
