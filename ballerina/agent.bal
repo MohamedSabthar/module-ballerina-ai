@@ -99,8 +99,9 @@ public isolated distinct class Agent {
             span.close(observe:ERROR);
             return functionCallAgent;
         }
-        span.close(observe:OK);
         self.functionCallAgent = functionCallAgent;
+        span.addTag("gen_ai.agent.tools", functionCallAgent.toolStore.getToolsInfo()); // Added by us not mandated by spec
+        span.close(observe:OK);
     }
 
     # Executes the agent for a given user query.

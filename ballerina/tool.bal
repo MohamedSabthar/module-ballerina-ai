@@ -39,6 +39,11 @@ public type Tool record {|
     isolated function caller;
 |};
 
+type ToolInfo record {|
+    string name;
+    string description;
+|};
+
 public isolated class ToolStore {
     public final map<Tool> & readonly tools;
     private map<()> mcpTools = {};
@@ -147,6 +152,14 @@ public isolated class ToolStore {
         lock {
             return self.mcpTools.hasKey(toolName);
         }
+    }
+
+    isolated function getToolsInfo() returns ToolInfo[] {
+        ToolInfo[] toolList = [];
+        foreach [string, Tool] [name, tool] in self.tools.entries() {
+            toolList.push({name, description: tool.description});
+        }
+        return toolList;
     }
 }
 

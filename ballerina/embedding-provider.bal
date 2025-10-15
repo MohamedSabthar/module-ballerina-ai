@@ -15,6 +15,7 @@
 // under the License.
 
 import ai.intelligence;
+import ai.observe;
 
 # Represents an embedding provider that converts chunk into vector embeddings for similarity search.
 public type EmbeddingProvider distinct isolated client object {
@@ -75,13 +76,25 @@ public distinct isolated client class Wso2EmbeddingProvider {
     # + chunk - The data to embed
     # + return - Embedding representation of the chunk content or an `ai:Error` if the embedding service fails
     isolated remote function embed(Chunk chunk) returns Embedding|Error {
+        // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/#spans
+        observe:AiSpan span = new observe:SpanImp("embeddings text-embedding-3-small");
+        span.addTag("gen_ai.operation.name", "embeddings");
+        span.addTag("gen_ai.provider.name", "WSO2");
+        span.addTag("gen_ai.request.model", "text-embedding-3-small");
+        span.addTag("gen_ai.response.model", "text-embedding-3-small");
+
         if chunk !is TextChunk|TextDocument {
             return error Error("Unsupported chunk type. only 'ai:TextChunk|ai:TextDocument' is supported");
         }
         intelligence:EmbeddingRequest request = {input: chunk.content};
+        span.addTag("gen_ai.input.content", chunk.content); // Added by us not mandated by spec
         intelligence:EmbeddingResponse|error response = self.embeddingClient->/embeddings.post(request);
         if response is error {
             return error Error("Error generating embedding for provided chunk", response);
+        }
+        int? inputTokens = response.usage?.promptTokens;
+        if inputTokens is int {
+            span.addTag("gen_ai.usage.prompt_tokens", inputTokens);
         }
         intelligence:EmbeddingResponse_data[] responseData = response.data;
         if responseData.length() == 0 {

@@ -207,6 +207,7 @@ public isolated distinct client class Wso2ModelProvider {
         span.addTag("gen_ai.request.temperature", self.temperature);
         span.addTag("gen_ai.response.model", "gpt-4o-mini");
         span.addTag("gen_ai.input.messages", convertMessageToAnydata(messages));
+        span.addTag("gen_ai.input.tools", tools); // Added by us not mandated by spec
         intelligence:CreateChatCompletionRequest request = {
             stop,
             messages: self.mapToChatCompletionRequestMessage(messages),
