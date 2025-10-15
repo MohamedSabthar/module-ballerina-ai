@@ -198,7 +198,7 @@ public isolated distinct client class Wso2ModelProvider {
     returns ChatAssistantMessage|Error {
         observe:AiSpan span = new observe:SpanImp("chat gpt-4o-mini");
         span.addTag("gen_ai.operation.name", "chat");
-        span.addTag("gen_ai.provider.name", "Ballerina");
+        span.addTag("gen_ai.provider.name", "WSO2");
         span.addTag("gen_ai.output.type", "text");
         span.addTag("gen_ai.request.model", "gpt-4o-mini");
         if stop is string {
