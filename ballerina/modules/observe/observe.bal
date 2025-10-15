@@ -79,11 +79,11 @@ public isolated function getCurrentAiSpan() returns AiSpan? {
         return;
     }
     lock {
-        return aiSpans.get(getUniqueSpanId());
+        return aiSpans[getUniqueSpanId()];
     }
 }
 
 isolated function getUniqueSpanId() returns string {
     map<string> ctx = observe:getSpanContext();
-    return ctx.get("spanId") + ctx.get("traceId");
+    return ctx.get("spanId") + ":" +ctx.get("traceId");
 }
