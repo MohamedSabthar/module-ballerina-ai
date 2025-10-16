@@ -1,3 +1,19 @@
+// Copyright (c) 2025 WSO2 LLC (http://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 import ballerina/log;
 import ballerina/observe;
 
@@ -32,11 +48,17 @@ enum GenAiTagNames {
     TOOL_DESCRIPTION = "gen_ai.tool.description",
     TOOL_TYPE = "gen_ai.tool.type",
 
-    // Added by us not mandated by spec
+    // Not mandated by spec
     TOOL_ARGUMENTS = "gen_ai.tool.arguments",
     TOOL_OUTPUT = "gen_ai.tool.output",
     INPUT_CONTENT = "gen_ai.input.content",
-    INPUT_TOOLS = "gen_ai.input.tools"
+    INPUT_TOOLS = "gen_ai.input.tools",
+    KNOWLEDGE_BASE_NAME = "gen_ai.knowledge_base.name",
+    KNOWLEDGE_BASE_ID = "gen_ai.knowledge_base.id",
+    KNOWLEDGE_BASE_INGEST_INPUT_CHUNKS = "gen_ai.knowledge_base.ingest.input.chunks",
+    KNOWLEDGE_BASE_RETRIEVE_INPUT_QUERY = "gen_ai.knowledge_base.retrieve.input.query",
+    KNOWLEDGE_BASE_RETRIEVE_INPUT_LIMIT = "gen_ai.knowledge_base.retrieve.input.limit",
+    KNOWLEDGE_BASE_RETRIEVE_INPUT_FILTER = "gen_ai.knowledge_base.retrieve.input.filter"
 }
 
 enum Operations {
@@ -45,7 +67,12 @@ enum Operations {
     CREATE_AGENT = "create_agent",
     EMBEDDINGS = "embeddings",
     EXECUTE_TOOL = "execute_tool",
-    GENERATE_CONTENT = "generate_content"
+    GENERATE_CONTENT = "generate_content",
+
+    // Not mandated by spec
+    CREATE_KNOWLEDGE_BASE = "create_knowledge_base",
+    KNOWLEDGE_BASE_INGEST = "knowledge_base_ingest",
+    KNOWLEDGE_BASE_RETRIEVE = "knowledge_base_retrieve"
 }
 
 public enum OutputType {
