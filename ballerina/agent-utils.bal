@@ -176,18 +176,21 @@ class Executor {
         anydata observation;
         ExecutionResult|ExecutionError executionResult;
         if parsedOutput is LlmToolResponse {
-            // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/#execute-tool-span
-            observe:AiSpan span = new observe:SpanImp("execute_tool " + parsedOutput.name);
-            span.addTag(observe:OPERATION_NAME, "execute_tool");
+            string toolName = parsedOutput.name;
+
+            observe:ExecuteToolSpan span = observe:createExecuteToolSpan(toolName);
             string? toolCallId = parsedOutput.id;
             if toolCallId is string {
-                span.addTag(observe:TOOL_CALL_ID, toolCallId);
+                span.addId(toolCallId);
             }
-            string toolName = parsedOutput.name;
-            span.addTag(observe:TOOL_NAME, toolName);
-            span.addTag(observe:TOOL_DESCRIPTION, self.agent.toolStore.getToolDescription(toolName));
-            span.addTag(observe:TOOL_TYPE, self.agent.toolStore.isMcpTool(toolName) ? "extension" : "function");
-            span.addTag(observe:TOOL_ARGUMENTS, parsedOutput.arguments); // Added by us not mandated by spec
+            string? toolDescription = self.agent.toolStore.getToolDescription(toolName);
+            if toolDescription is string {
+                span.addDescription(toolDescription);
+
+            }
+            span.addType(self.agent.toolStore.isMcpTool(toolName) ? observe:EXTENTION : observe:FUNCTION);
+            span.addArguments(parsedOutput.arguments);
+
             ToolOutput|ToolExecutionError|LlmInvalidGenerationError output = self.agent.toolStore.execute(parsedOutput,
                 self.progress.context);
             if output is Error {
@@ -203,7 +206,9 @@ class Executor {
                     'error: output,
                     observation: observation.toString()
                 };
-                span.close(error Error(observation.toString(), details = {parsedOutput}));
+
+                Error toolExecutionError = error Error(observation.toString(), details = {parsedOutput});
+                span.close(toolExecutionError);
             } else {
                 anydata|error value = output.value;
                 observation = value is error ? value.toString() : value;
@@ -211,7 +216,8 @@ class Executor {
                     tool: parsedOutput,
                     observation: value
                 };
-                span.addTag(observe:TOOL_OUTPUT, observation); // Added by us not mandated by spec
+
+                span.addOutput(observation);
                 span.close();
             }
         } else {
@@ -277,6 +283,7 @@ isolated function run(BaseAgent agent, string instruction, string query, int max
 
         ChatMessage[] temporaryMemory = [];
         foreach ExecutionResult|LlmChatResponse|ExecutionError|Error step in iterator {
+            // TODO: agent itegration span
             if iter == maxIter {
                 break;
             }

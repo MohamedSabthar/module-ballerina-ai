@@ -8,7 +8,7 @@ enum Status {
     ERROR = "Error"
 }
 
-public enum GenAiTagNames {
+enum GenAiTagNames {
     OPERATION_NAME = "gen_ai.operation.name",
     PROVIDER_NAME = "gen_ai.provider.name",
     CONVERSATION_ID = "gen_ai.conversation.id",
@@ -33,20 +33,39 @@ public enum GenAiTagNames {
     TOOL_TYPE = "gen_ai.tool.type",
 
     // Added by us not mandated by spec
-    TOOL_ARGUMENTS = "gen_ai.tool.arguments", 
+    TOOL_ARGUMENTS = "gen_ai.tool.arguments",
     TOOL_OUTPUT = "gen_ai.tool.output",
     INPUT_CONTENT = "gen_ai.input.content",
     INPUT_TOOLS = "gen_ai.input.tools"
 }
 
+enum Operations {
+    CHAT = "chat",
+    INVOKE_AGENT = "invoke_agent",
+    CREATE_AGENT = "create_agent",
+    EMBEDDINGS = "embeddings",
+    EXECUTE_TOOL = "execute_tool",
+    GENERATE_CONTENT = "generate_content"
+}
+
+public enum OutputType {
+    TEXT = "text",
+    JSON = "json"
+}
+
+public enum ToolType {
+    FUNCTION = "function",
+    EXTENTION = "extension"
+}
+
 # Represents an AI tracing span that allows adding tags and closing the span.
-public type AiSpan isolated object {
+public type AiSpan distinct isolated object {
 
     # Adds a tag to the span.
     #
     # + key - The name of the tag
     # + value - The value associated with the tag
-    public isolated function addTag(GenAiTagNames key, anydata value);
+    isolated function addTag(GenAiTagNames key, anydata value);
 
     # Closes the span and records its final status.
     #
@@ -70,7 +89,7 @@ public isolated function getCurrentAiSpan() returns AiSpan? {
 }
 
 # Implementation of the `AiSpan` interface used to trace AI-related operations.
-public isolated class SpanImp {
+isolated class BaseSpanImp {
     *AiSpan;
     private final int|error spanId;
 
@@ -79,7 +98,7 @@ public isolated class SpanImp {
     # If tracing is disabled or span creation fails, the span is not recorded.
     #
     # + name - The name of the span to be created
-    public isolated function init(string name) {
+    isolated function init(string name) {
         if !observe:isTracingEnabled() {
             return;
         }
@@ -90,10 +109,6 @@ public isolated class SpanImp {
             log:printError("failed to start span", 'error = spanId);
             return;
         }
-
-        lock {
-            aiSpans[getUniqueIdOfCurrentSpan()] = self;
-        }
         addOtherTags("span.type", "ai", spanId);
     }
 
@@ -102,7 +117,7 @@ public isolated class SpanImp {
     #
     # + key - The tag name
     # + value - The tag value; can be anydata type
-    public isolated function addTag(GenAiTagNames key, anydata value) {
+    isolated function addTag(GenAiTagNames key, anydata value) {
         if !observe:isTracingEnabled() {
             return;
         }
@@ -128,7 +143,6 @@ public isolated class SpanImp {
         if !observe:isTracingEnabled() {
             return;
         }
-        removeCurrentAiSpan();
 
         int|error spanId = self.spanId;
         if spanId is error {
@@ -144,6 +158,7 @@ public isolated class SpanImp {
 
         addOtherTags("error.type", 'error.toString(), spanId);
         addOtherTags("otel.status_code", ERROR, spanId);
+        removeCurrentAiSpan();
         finishSpan(spanId);
     }
 }
@@ -182,5 +197,11 @@ isolated function addOtherTags(string key, anydata value, int spanId) {
     error? result = observe:addTagToSpan(key, value is string ? value : value.toJsonString(), spanId);
     if result is error {
         log:printError(string `failed to add tag '${key}' to span with ID '${spanId}'`, 'error = result);
+    }
+}
+
+isolated function recordAiSpan(AiSpan span) {
+    lock {
+        aiSpans[getUniqueIdOfCurrentSpan()] = span;
     }
 }

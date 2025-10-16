@@ -77,11 +77,8 @@ public distinct isolated client class Wso2EmbeddingProvider {
     # + return - Embedding representation of the chunk content or an `ai:Error` if the embedding service fails
     isolated remote function embed(Chunk chunk) returns Embedding|Error {
         // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/#spans
-        observe:AiSpan span = new observe:SpanImp("embeddings text-embedding-3-small");
-        span.addTag(observe:OPERATION_NAME, "embeddings");
-        span.addTag(observe:PROVIDER_NAME, "WSO2");
-        span.addTag(observe:REQUEST_MODEL, "text-embedding-3-small");
-        span.addTag(observe:RESPONSE_MODEL, "text-embedding-3-small");
+        observe:EmbeddingSpan span = observe:createEmbeddingSpan("text-embedding-3-small");
+        span.addProvider("WSO2");
 
         if chunk !is TextChunk|TextDocument {
             Error err = error Error("Unsupported chunk type. only 'ai:TextChunk|ai:TextDocument' is supported");
@@ -89,7 +86,8 @@ public distinct isolated client class Wso2EmbeddingProvider {
             return err;
         }
         intelligence:EmbeddingRequest request = {input: chunk.content};
-        span.addTag(observe:INPUT_CONTENT, chunk.content); // Added by us not mandated by spec
+        span.addInputContent(chunk.content);
+
         intelligence:EmbeddingResponse|error response = self.embeddingClient->/embeddings.post(request);
         if response is error {
             Error err = error Error("Error generating embedding for provided chunk", response);
@@ -98,7 +96,7 @@ public distinct isolated client class Wso2EmbeddingProvider {
         }
         int? inputTokens = response.usage?.promptTokens;
         if inputTokens is int {
-            span.addTag(observe:OUTPUT_TOKENS, inputTokens);
+            span.addInputContent(inputTokens);
         }
         intelligence:EmbeddingResponse_data[] responseData = response.data;
         if responseData.length() == 0 {
@@ -106,6 +104,7 @@ public distinct isolated client class Wso2EmbeddingProvider {
             span.close(err);
             return err;
         }
+
         span.close();
         return responseData[0].embedding;
     }
@@ -115,27 +114,30 @@ public distinct isolated client class Wso2EmbeddingProvider {
     # + chunks - The array of chunks to be converted into embeddings
     # + return - An array of embeddings on success, or an `ai:Error`
     isolated remote function batchEmbed(Chunk[] chunks) returns Embedding[]|Error {
-        observe:AiSpan span = new observe:SpanImp("embeddings text-embedding-3-small");
-        span.addTag(observe:OPERATION_NAME, "embeddings");
-        span.addTag(observe:PROVIDER_NAME, "WSO2");
-        span.addTag(observe:REQUEST_MODEL, "text-embedding-3-small");
-        span.addTag(observe:RESPONSE_MODEL, "text-embedding-3-small");
+        observe:EmbeddingSpan span = observe:createEmbeddingSpan("text-embedding-3-small");
+        span.addProvider("WSO2");
+
         if !isAllTextChunks(chunks) {
             Error err = error Error("Unsupported chunk type. Expected elements of type 'ai:TextChunk|ai:TextDocument'.");
             span.close(err);
             return err;
         }
         string[] input = chunks.map(chunk => chunk.content.toString());
-        span.addTag(observe:INPUT_CONTENT, input); // Added by us not mandated by spec
+        span.addInputContent(input);
+
         intelligence:EmbeddingResponse|error response = self.embeddingClient->/embeddings.post({input});
         if response is error {
-            return error Error("Error generating embedding for provided chunk", response);
+            Error err = error Error("Error generating embedding for provided chunk", response);
+            span.close(err);
+            return err;
         }
-        intelligence:EmbeddingResponse_data[] responseData = response.data;
+
         int? inputTokens = response.usage?.promptTokens;
         if inputTokens is int {
-            span.addTag(observe:OUTPUT_TOKENS, inputTokens);
+            span.addInputTokenCount(inputTokens);
         }
+
+        intelligence:EmbeddingResponse_data[] responseData = response.data;
         if responseData.length() == 0 {
             Error err = error Error("No embeddings generated for the provided chunk");
             span.close(err);

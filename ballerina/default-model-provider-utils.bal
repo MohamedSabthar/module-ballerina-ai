@@ -235,17 +235,13 @@ isolated function getLlMResponse(intelligence:Client llmClient,
         typedesc<anydata> expectedResponseTypedesc,
         boolean isOriginallyJsonObject, int retryCount, decimal retryInterval) returns anydata|Error {
     // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/#spans
-    observe:AiSpan span = new observe:SpanImp("generate_content gpt-4o-mini");
-    span.addTag(observe:OPERATION_NAME, "generate_content");
-    span.addTag(observe:PROVIDER_NAME, "WSO2");
-    span.addTag(observe:OUTPUT_TYPE, "json");
-    span.addTag(observe:REQUEST_MODEL, "gpt-4o-mini");
+    observe:GenerateContentSpan span = new ("gpt-4o-mini");
+    span.addOutputType(observe:JSON);
     decimal? temperature = request?.temperature;
     if temperature is decimal {
-        span.addTag(observe:TEMPERATURE, temperature);
+        span.addTemperature(temperature);
     }
-    span.addTag(observe:RESPONSE_MODEL, "gpt-4o-mini");
-    span.addTag(observe:INPUT_MESSAGES, request.messages);
+    span.addInputMessages(request.messages.toJson());
     intelligence:CreateChatCompletionResponse|error response = llmClient->/chat/completions.post(request);
     if response is error {
         Error err = error("LLM call failed: " + response.message(), detail = response.detail(), cause = response.cause());
@@ -262,15 +258,15 @@ isolated function getLlMResponse(intelligence:Client llmClient,
 
     string? responseId = response["id"];
     if responseId is string {
-        span.addTag(observe:RESPONSE_ID, responseId);
+        span.addResponseId(responseId);
     }
     int? inputTokens = response.usage?.promptTokens;
     if inputTokens is int {
-        span.addTag(observe:INPUT_TOKENS, inputTokens);
+        span.addInputTokenCount(inputTokens);
     }
     int? outputTokens = response.usage?.completionTokens;
     if outputTokens is int {
-        span.addTag(observe:OUTPUT_TOKENS, outputTokens);
+        span.addOutputTokenCount(outputTokens);
     }
 
     if choices.length() == 0 {
@@ -281,7 +277,7 @@ isolated function getLlMResponse(intelligence:Client llmClient,
 
     string? finishReason = choices[0].finishReason;
     if finishReason is string {
-        span.addTag(observe:FINISH_REASON, [finishReason]);
+        span.addFinishReason(finishReason);
     }
 
     intelligence:ChatCompletionResponseMessage? message = choices[0].message;
@@ -330,7 +326,7 @@ isolated function getLlMResponse(intelligence:Client llmClient,
     }
 
     if result is anydata {
-        span.addTag(observe:OUTPUT_MESSAGES, result);
+        span.addOutputMessages(result.toJson());
         span.close();
         return result;
     }
