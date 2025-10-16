@@ -14,8 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import ai.observe;
-
 import ballerina/log;
 
 # Function call agent. 
@@ -90,11 +88,6 @@ isolated distinct class FunctionCallAgent {
                 parameters: tool.variables
             };
         ChatAssistantMessage response = check self.model->chat(messages, tools = chatCompletionFunctions);
-        observe:AiSpan? span = observe:getCurrentAiSpan();
-        if span is observe:ChatSpan {
-            span.addInputMessages(convertMessageToJson(messages));
-            span.addOutputMessages(convertMessageToJson(response));
-        }
         FunctionCall[]? toolCalls = response?.toolCalls;
         return toolCalls is FunctionCall[] ? toolCalls[0] : response?.content;
     }

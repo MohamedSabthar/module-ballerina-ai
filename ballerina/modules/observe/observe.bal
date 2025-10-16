@@ -69,8 +69,8 @@ public type AiSpan distinct isolated object {
 
     # Closes the span and records its final status.
     #
-    # + 'error - Optional error that indicates if the operation failed
-    public isolated function close(error? 'error = ());
+    # + 'err - Optional error that indicates if the operation failed
+    public isolated function close(error? err = ());
 };
 
 # Retrieves the current active AI span, if any.
