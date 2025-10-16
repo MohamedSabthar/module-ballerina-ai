@@ -81,13 +81,13 @@ isolated distinct class FunctionCallAgent {
         // TODO: Improve handling of multiple tool calls returned by the LLM.  
         // Currently, tool calls are executed sequentially in separate chat responses.  
         // Update the logic to execute all tool calls together and return a single response.
-        ChatAssistantMessage response = check self.model->chat(messages,
-        from Tool tool in self.toolStore.tools.toArray()
-        select {
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.variables
-        });
+        ChatCompletionFunctions[] chatCompletionFunctions = from Tool tool in self.toolStore.tools.toArray()
+            select {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.variables
+            };
+        ChatAssistantMessage response = check self.model->chat(messages, tools = chatCompletionFunctions);
         FunctionCall[]? toolCalls = response?.toolCalls;
         return toolCalls is FunctionCall[] ? toolCalls[0] : response?.content;
     }
