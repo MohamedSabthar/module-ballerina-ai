@@ -54,10 +54,15 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * Maps Ballerina service listeners to OpenAPI {@link Server} definitions by extracting host and port information.
+ * Modifies the given OpenAPI instance by adding the mapped server details.
+ */
 public class ServersMapper {
     private static final String SERVER = "server";
     private static final String PORT = "port";
     private static final String HOST_FIELD_NAME = "host";
+    private static final String LISTEN_ON = "listenOn";
     private static final String DEFAULT_HTTP_PORT = "9090";
     private static final String PORT_443 = "443";
     private static final String HTTPS_LOCALHOST = "https://localhost";
@@ -84,24 +89,24 @@ public class ServersMapper {
     public void setServers() {
         extractServersFromServiceExpressions();
 
-        List<Server> servers = openAPI.getServers();
+        List<Server> servers = this.openAPI.getServers();
         if (!endpoints.isEmpty()) {
             for (ListenerDeclarationNode endpoint : endpoints.values()) {
-                for (ExpressionNode expression : service.expressions()) {
+                for (ExpressionNode expression : this.service.expressions()) {
                     addServerForEndpoint(servers, endpoint, expression);
                 }
             }
         }
 
         if (isServerListEmpty()) {
-            openAPI.setServers(Collections.singletonList(getDefaultServerWithBasePath(getServiceBasePath())));
+            this.openAPI.setServers(Collections.singletonList(getDefaultServerWithBasePath(getServiceBasePath())));
         } else if (servers.size() > 1) {
-            openAPI.setServers(Collections.singletonList(mergeServerEnums(servers)));
+            this.openAPI.setServers(Collections.singletonList(mergeServerEnums(servers)));
         }
     }
 
     private boolean isServerListEmpty() {
-        return openAPI.getServers().isEmpty() || openAPI.getServers().stream()
+        return this.openAPI.getServers().isEmpty() || this.openAPI.getServers().stream()
                 .allMatch(server -> server.getUrl() == null
                         && (server.getVariables() == null || server.getVariables().isEmpty()));
     }
@@ -173,7 +178,7 @@ public class ServersMapper {
         List<Server> servers = new ArrayList<>();
         String basePath = getServiceBasePath();
 
-        for (ExpressionNode expression : service.expressions()) {
+        for (ExpressionNode expression : this.service.expressions()) {
             if (expression.kind() == SyntaxKind.EXPLICIT_NEW_EXPRESSION) {
                 ExplicitNewExpressionNode explicit = (ExplicitNewExpressionNode) expression;
                 servers.add(generateServer(basePath, Optional.ofNullable(explicit.parenthesizedArgList())));
@@ -183,22 +188,33 @@ public class ServersMapper {
         openAPI.setServers(servers);
     }
 
-    // Handles the following 80% cases
-
-    // ai:Listener l = new (6489)
-    // ai:Listener l = new (listenOn = 6489)
-    // ai:Listener l = new (httpListener)
-    // ai:Listener l = new (listenOn = httpListener)
-    // ai:Listener l = new (check http:getDefaultListener())
-    // ai:Listener l = new (listenOn = check http:getDefaultListener())
-
-    // http:Listener httpListener = new(9090)
-    // http:Listener httpListener = new(host = 9090)
-    // http:Listener httpListener = new(9090, host="127.0.0.0")
-    // http:Listener httpListener = new(9090, {host: "127.0.0.0"})
-    // http:Listener httpListener = check http:getDefaultListener();
-
-    // Generate default server for the remaining cases
+    /**
+     * Generates a {@link Server} object by analyzing the listener instantiation syntax and extracting
+     * relevant host and port information. This method covers the majority of listener declaration
+     * patterns used in Ballerina services and constructs the corresponding OpenAPI server definition.
+     * <p>
+     * Handles the following common listener initialization scenarios:
+     * <ul>
+     *   <li><code>ai:Listener l = new (6489)</code></li>
+     *   <li><code>ai:Listener l = new (listenOn = 6489)</code></li>
+     *   <li><code>ai:Listener l = new (httpListener)</code></li>
+     *   <li><code>ai:Listener l = new (listenOn = httpListener)</code></li>
+     *   <li><code>ai:Listener l = new (check http:getDefaultListener())</code></li>
+     *   <li><code>ai:Listener l = new (listenOn = check http:getDefaultListener())</code></li>
+     *   <li><code>http:Listener httpListener = new(9090)</code></li>
+     *   <li><code>http:Listener httpListener = new(host = 9090)</code></li>
+     *   <li><code>http:Listener httpListener = new(9090, host = "127.0.0.1")</code></li>
+     *   <li><code>http:Listener httpListener = new(9090, { host: "127.0.0.1" })</code></li>
+     *   <li><code>http:Listener httpListener = check http:getDefaultListener()</code></li>
+     * </ul>
+     * <p>
+     * For any unhandled or unexpected listener patterns, a default server instance is generated using
+     * the provided base path and default host/port values.
+     *
+     * @param basePath   the absolute base path of the service (used as the path component of the server URL)
+     * @param argListOpt the optional list of listener constructor arguments extracted from the syntax tree
+     * @return a {@link Server} instance populated with the appropriate host, port, and URL variables
+     */
     private Server generateServer(String basePath, Optional<ParenthesizedArgList> argListOpt) {
         ServerVariables serverVars = new ServerVariables();
         String port = null;
@@ -209,7 +225,7 @@ public class ServersMapper {
             if (!args.isEmpty()) {
                 FunctionArgumentNode firstArg = args.get(0);
                 if (firstArg instanceof PositionalArgumentNode posArg) {
-                    Optional<Symbol> symbol = semanticModel.symbol(posArg);
+                    Optional<Symbol> symbol = semanticModel.symbol(posArg.expression());
                     if (symbol.isPresent() && symbol.get() instanceof VariableSymbol
                             && endpoints.containsKey(posArg.expression().toSourceCode().strip())) {
                         String varName = posArg.expression().toSourceCode().strip();
@@ -219,8 +235,8 @@ public class ServersMapper {
                     port = getValidPort(firstArg);
                 } else if (firstArg instanceof NamedArgumentNode namedArg
                         && (namedArg.argumentName().name().text().strip().equals(PORT)
-                        || namedArg.argumentName().name().text().strip().equals("listenTo"))) {
-                    Optional<Symbol> symbol = semanticModel.symbol(namedArg);
+                        || namedArg.argumentName().name().text().strip().equals(LISTEN_ON))) {
+                    Optional<Symbol> symbol = semanticModel.symbol(namedArg.expression());
                     if (symbol.isPresent() && symbol.get() instanceof VariableSymbol
                             && endpoints.containsKey(namedArg.expression().toSourceCode().strip())) {
                         String varName = namedArg.expression().toSourceCode().strip();
@@ -265,6 +281,11 @@ public class ServersMapper {
 
     private String getValidPort(FunctionArgumentNode functionArgumentNode) {
         String text = functionArgumentNode.toString();
+        if (functionArgumentNode instanceof NamedArgumentNode namedArgumentNode) {
+            text = namedArgumentNode.expression().toSourceCode().trim();
+        } else if (functionArgumentNode instanceof PositionalArgumentNode positionalArgumentNode) {
+            text = positionalArgumentNode.expression().toSourceCode().trim();
+        }
         return text.matches("\\d+") ? text : null;
     }
 
@@ -292,7 +313,7 @@ public class ServersMapper {
 
     private String getServiceBasePath() {
         StringBuilder path = new StringBuilder();
-        for (Node node : service.absoluteResourcePath()) {
+        for (Node node : this.service.absoluteResourcePath()) {
             path.append(MapperCommonUtils.unescapeIdentifier(node.toString()));
         }
         return path.toString().trim();

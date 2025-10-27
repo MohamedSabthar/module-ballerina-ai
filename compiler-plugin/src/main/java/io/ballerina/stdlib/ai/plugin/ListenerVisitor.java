@@ -21,6 +21,7 @@ package io.ballerina.stdlib.ai.plugin;
 import io.ballerina.compiler.syntax.tree.ListenerDeclarationNode;
 import io.ballerina.compiler.syntax.tree.NodeVisitor;
 
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -36,6 +37,6 @@ public class ListenerVisitor extends NodeVisitor {
     }
 
     public Set<ListenerDeclarationNode> getListenerDeclarationNodes() {
-        return this.listenerDeclarationNodes;
+        return Collections.unmodifiableSet(this.listenerDeclarationNodes);
     }
 }
