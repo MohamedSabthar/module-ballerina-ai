@@ -71,6 +71,13 @@ public type AgentConfiguration record {|
     # Defaults to use an in-memory message store that trims on overflow, if unspecified.
     @display {label: "Memory"}
     Memory? memory?;
+
+    # Instead of sending all tool schemas directly to the LLM, it first sends only the list of tools 
+    # along with their descriptions. The LLM then selects the tools required to fulfill the user query.
+    # After receiving the selected tools, their corresponding schemas are loaded and sent to the LLM 
+    # to request the necessary parameters for execution. This follows a double-dispatching approach.
+    @display {label: "Enable Lazy Tool Loading"}
+    boolean enableLazyToolLoading = false;
 |};
 
 # Represents an agent.
@@ -80,6 +87,7 @@ public isolated distinct class Agent {
     private final readonly & SystemPrompt systemPrompt;
     private final boolean verbose;
     private final string uniqueId = uuid:createRandomUuid();
+    private final boolean enableLazyToolLoading;
 
     # Initialize an Agent.
     #
@@ -94,9 +102,10 @@ public isolated distinct class Agent {
         self.verbose = config.verbose;
         self.systemPrompt = config.systemPrompt.cloneReadOnly();
         Memory? memory = config.hasKey("memory") ? config?.memory : check new ShortTermMemory();
+        self.enableLazyToolLoading = config.enableLazyToolLoading;
 
         do {
-            self.functionCallAgent = check new FunctionCallAgent(config.model, config.tools, memory);
+            self.functionCallAgent = check new FunctionCallAgent(config.model, config.tools, memory, config.enableLazyToolLoading);
             span.addTools(self.functionCallAgent.toolStore.getToolsInfo());
             span.close();
         } on fail Error err {

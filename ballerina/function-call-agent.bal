@@ -15,6 +15,7 @@
 // under the License.
 
 import ballerina/log;
+import ballerina/lang.regexp;
 
 # Function call agent. 
 # This agent uses OpenAI function call API to perform the tool selection.
@@ -28,6 +29,7 @@ isolated distinct class FunctionCallAgent {
     final Memory memory;
     # Represents if the agent is stateless or not.
     final boolean stateless;
+    final boolean enableLazyToolLoading;
 
     # Initialize an Agent.
     #
@@ -35,11 +37,12 @@ isolated distinct class FunctionCallAgent {
     # + tools - Tools to be used by the agent
     # + memory - The memory associated with the agent.
     isolated function init(ModelProvider model, (BaseToolKit|ToolConfig|FunctionTool)[] tools,
-            Memory? memory = ()) returns Error? {
+            Memory? memory = (), boolean enableLazyToolLoading = false) returns Error? {
         self.toolStore = check new (...tools);
         self.model = model;
         self.memory = memory ?: check new ShortTermMemory();
         self.stateless = memory is ();
+        self.enableLazyToolLoading = enableLazyToolLoading;
     }
 
     # Parse the function calling API response and extract the tool to be executed.
@@ -78,16 +81,59 @@ isolated distinct class FunctionCallAgent {
             messages.unshift(...additionalMessages);
         }
 
-        // TODO: Improve handling of multiple tool calls returned by the LLM.  
-        // Currently, tool calls are executed sequentially in separate chat responses.  
-        // Update the logic to execute all tool calls together and return a single response.
-        ChatAssistantMessage response = check self.model->chat(messages,
-        from Tool tool in self.toolStore.tools.toArray()
+        ChatMessage lastMessageInArray = messages[messages.length() - 1];
+
+        ChatCompletionFunctions[] tools = from Tool tool in self.toolStore.tools.toArray()
         select {
             name: tool.name,
             description: tool.description,
             parameters: tool.variables
-        });
+        };
+
+        if self.enableLazyToolLoading && lastMessageInArray is ChatUserMessage {
+            ToolInfo[] toolInfo = self.toolStore.getToolsInfo();
+            string toolsString = "\n\nThese are following tools avalilable for you ```" 
+            + toolInfo.toJsonString() 
+            + "``` select the tools needed to complete the task and return it as an array of toolNames in json format ```[\"toolNameOne\", \"toolNameTwo\", \"toolNameN\"]```. if not tools needed return an empty array```[]```";
+
+            string|Prompt content = lastMessageInArray.content;
+            if content is string {
+                content += toolsString;
+            } else {
+                content.insertions.push(toolsString);
+            }
+            
+            _ = messages.pop(); // remove the last one and update with tool string
+            ChatUserMessage modifiedUserMessage = {role: USER, content};
+            messages.push(modifiedUserMessage);
+
+            ChatAssistantMessage response = check self.model->chat(messages, []);
+            string responseContent = response.content ?: "[]";
+            log:printInfo("Lazy tool loading output: " + responseContent);
+            responseContent = regexp:replaceAll(checkpanic regexp:fromString("```"), responseContent, "");
+            string[]|error selectedTools = responseContent.fromJsonStringWithType();
+            log:printInfo("Lazy tool loading output (remove backticks if present): " + responseContent);
+
+            if selectedTools is error {
+                log:printError("Failed to lazy load tools", selectedTools);
+            } else {
+                readonly & string[] filteredTools = selectedTools.cloneReadOnly();
+                tools = from ChatCompletionFunctions tool in tools
+                    let string toolName = tool.name
+                    where filteredTools.some(selected => selected == toolName)
+                    select tool;
+            }
+            log:printInfo("Selected tools", tools = tools);
+            
+            // after selecting the tool revert back to original message
+             _ = messages.pop(); // remove the last one and update with tool string
+            messages.push(lastMessageInArray);
+        }
+
+        // TODO: Improve handling of multiple tool calls returned by the LLM.  
+        // Currently, tool calls are executed sequentially in separate chat responses.  
+        // Update the logic to execute all tool calls together and return a single response.
+        ChatAssistantMessage response = check self.model->chat(messages, tools);
         FunctionCall[]? toolCalls = response?.toolCalls;
         return toolCalls is FunctionCall[] ? toolCalls[0] : response?.content;
     }
