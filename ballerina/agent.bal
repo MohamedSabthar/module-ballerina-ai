@@ -103,7 +103,8 @@ public isolated distinct class Agent {
 
         do {
             self.functionCallAgent = check new FunctionCallAgent(config.model, config.tools, memory,
-                config.toolLoadingStrategy);
+                config.toolLoadingStrategy
+            );
             span.addTools(self.functionCallAgent.toolStore.getToolsInfo());
             span.close();
         } on fail Error err {
@@ -113,7 +114,7 @@ public isolated distinct class Agent {
     }
 
     # Executes the agent for a given user query.
-    # 
+    #
     # **Note:** Calls to this function using the same session ID must be invoked sequentially by the caller, 
     # as this operation is not thread-safe.
     #
@@ -127,9 +128,9 @@ public isolated distinct class Agent {
         string executionId = uuid:createRandomUuid();
 
         log:printDebug("Agent execution started",
-            executionId = executionId,
-            query = query,
-            sessionId = sessionId
+                executionId = executionId,
+                query = query,
+                sessionId = sessionId
         );
         observe:InvokeAgentSpan span = observe:createInvokeAgentSpan(self.systemPrompt.role);
         span.addId(self.uniqueId);
@@ -143,18 +144,18 @@ public isolated distinct class Agent {
         do {
             string answer = check getAnswer(executionTrace, self.maxIter);
             log:printDebug("Agent execution completed successfully",
-                executionId = executionId,
-                steps = executionTrace.steps.toString(),
-                answer = answer
+                    executionId = executionId,
+                    steps = executionTrace.steps.toString(),
+                    answer = answer
             );
             span.addOutput(observe:TEXT, answer);
             span.close();
             return answer;
         } on fail Error err {
             log:printDebug("Agent execution failed",
-                err,
-                executionId = executionId,
-                steps = executionTrace.steps.toString()
+                    err,
+                    executionId = executionId,
+                    steps = executionTrace.steps.toString()
             );
             span.close(err);
             return err;
@@ -162,6 +163,10 @@ public isolated distinct class Agent {
     }
 
 }
+
+public isolated function runWithType(@display {label: "Query"} string query,
+        @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
+        Context context = new, typedesc<Trace|string> td = <>) returns td|Error = external;
 
 isolated function getAnswer(ExecutionTrace executionTrace, int maxIter) returns string|Error {
     string? answer = executionTrace.answer;
