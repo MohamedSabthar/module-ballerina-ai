@@ -215,6 +215,9 @@ isolated function constructError((ExecutionResult|ExecutionError|Error)[] steps,
         if step is ExecutionError && step.'error is MemoryError {
             return <MemoryError>step.'error;
         }
+        if step is LlmConnectionError {
+            return step;
+        }
     }
     return error Error("Unable to obtain valid answer from the agent", steps = steps);
 }
