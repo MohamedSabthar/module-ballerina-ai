@@ -24,7 +24,7 @@ isolated service /llm on new http:Listener(8080) {
             @http:Header string x\-product,
             @http:Header string x\-usage\-context) returns CreateChatCompletionResponse|error {
         test:assertEquals(x\-product, "bi");
-        test:assertEquals(x\-usage\-context, "model_provider_generate");
+        test:assertEquals(x\-usage\-context, "model_provider_chat");
         [ChatCompletionRequestMessage[], string] [messages, initialText] = check validateChatCompletionPayload(payload);
 
         json[]? content = check messages[0]["content"].ensureType();
