@@ -42,3 +42,27 @@ isolated function testLoadConversationThreads() returns error? {
     ];
     test:assertEquals(trace_2.toolCalls, expectedToolCalls);
 }
+
+isolated function buildMinimalTrace(string|Prompt content) returns Trace => {
+    id: "test-trace",
+    userMessage: {role: USER, content},
+    iterations: [],
+    output: {role: ASSISTANT, content: "answer"},
+    tools: [],
+    startTime: [0, 0.0d],
+    endTime: [0, 0.0d]
+};
+
+@test:Config
+isolated function testGetUserQueryWithStringContent() {
+    Trace trace = buildMinimalTrace("What is 2+2?");
+    test:assertEquals(getUserQuery(trace), "What is 2+2?");
+}
+
+@test:Config
+isolated function testGetUserQueryWithPromptContent() {
+    int a = 2;
+    int b = 2;
+    Trace trace = buildMinimalTrace(`What is ${a}+${b}?`);
+    test:assertEquals(getUserQuery(trace), "What is 2+2?");
+}

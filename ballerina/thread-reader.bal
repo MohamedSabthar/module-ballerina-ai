@@ -172,3 +172,12 @@ isolated function getChatMessage(TraceChatMessage message) returns readonly & Ch
     }
     return message.cloneReadOnly();
 }
+
+# Extracts the user query from a conversation trace.
+#
+# + trace - The conversation trace containing the user message
+# + return - The user query as a string
+public isolated function getUserQuery(Trace trace) returns string {
+    string|Prompt query = trace.userMessage.content;
+    return toString(query);
+}
