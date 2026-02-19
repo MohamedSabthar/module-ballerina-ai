@@ -179,5 +179,5 @@ isolated function getChatMessage(TraceChatMessage message) returns readonly & Ch
 # + return - The user query as a string
 public isolated function getUserQuery(Trace trace) returns string {
     string|Prompt query = trace.userMessage.content;
-    return toString(query);
+    return getChatMessageStringContent(query);
 }
