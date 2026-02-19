@@ -3,8 +3,10 @@ fixes:
   - "ballerina/ai/**/::../ballerina/"
 
 ignore:
-    - "ballerina-tests"
-    - "native/src/test"
+  - "ballerina-tests"
+  - "native/src/test"
+  - "ballerina/modules/intelligence" # Generated connector
+  - "ballerina/modules/observe" # Needs manual testing with observablity provider
 
 coverage:
   precision: 2
