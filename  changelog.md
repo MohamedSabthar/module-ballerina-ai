@@ -5,7 +5,7 @@ This file documents all significant changes made to the Ballerina AI package acr
 ## [Unreleased]
 
 ### Added
-
+- [Add `getUserQuery` Function to Obtain User Query as String from Trace Record](https://github.com/ballerina-platform/module-ballerina-ai/pull/119)
 - [Add Support to Load Conversation Threads from Evaluation Dataset JSON](https://github.com/wso2/product-ballerina-integrator/issues/2399)
 - [Add Tool Invocation Tracking to ai:Trace via `toolCalls` Field](https://github.com/wso2/product-ballerina-integrator/issues/2425)
 
