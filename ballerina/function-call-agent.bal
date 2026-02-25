@@ -133,9 +133,11 @@ isolated distinct class FunctionCallAgent {
     # + executionId - Unique identifier for this execution
     # + return - Returns the execution steps tracing the agent's reasoning and outputs from the tools
     isolated function run(string query, string instruction, int maxIter = 5, boolean verbose = true,
-            string sessionId = DEFAULT_SESSION_ID, Context context = new, string executionId = DEFAULT_EXECUTION_ID)
+            string sessionId = DEFAULT_SESSION_ID, Context context = new, string executionId = DEFAULT_EXECUTION_ID,
+            string[] hitlTools = [], json? resumeLlmResponse = (), HITLApproval? hitlApproval = ())
             returns ExecutionTrace {
-        return run(self, instruction, query, maxIter, verbose, sessionId, context, executionId);
+        return run(self, instruction, query, maxIter, verbose, sessionId, context, executionId,
+                hitlTools, resumeLlmResponse, hitlApproval);
     }
 
 }

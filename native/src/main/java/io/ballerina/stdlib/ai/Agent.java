@@ -34,10 +34,10 @@ public class Agent {
 
     @SuppressWarnings("unused")
     public static Object run(Environment env, BObject agent,
-                             BString query, BString sessionId, BObject context, BTypedesc td) {
+                             BString query, BString sessionId, BObject context, Object hitlApproval, BTypedesc td) {
         return env.yieldAndRun(() -> {
             try {
-                Object[] paramFeed = getRunInternalMethodParams(query, sessionId, context, td);
+                Object[] paramFeed = getRunInternalMethodParams(query, sessionId, context, hitlApproval, td);
                 return env.getRuntime().callMethod(agent, RUN_INTERNAL_METHOD_NAME, null, paramFeed);
             } catch (BError bError) {
                 return ModuleUtils.createError("Unable to obtain valid answer from the agent", bError);
@@ -46,10 +46,10 @@ public class Agent {
     }
 
     private static Object[] getRunInternalMethodParams(BString query, BString sessionId, BObject context,
-                                                       BTypedesc td) {
-        boolean withTrace = !TypeUtils.isSameType(PredefinedTypes.TYPE_STRING, td.getDescribingType());
+                                                       Object hitlApproval, BTypedesc td) {
+        boolean withTrace = !td.getDescribingType().isAnydata();
         return new Object[]{
-                query, sessionId, context, withTrace
+                query, sessionId, context, withTrace, hitlApproval
         };
     }
 }

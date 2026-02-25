@@ -75,10 +75,16 @@ public type AgentConfiguration record {|
     @display {label: "Memory"}
     Memory? memory?;
 
-    # Defines the strategies for loading tool schemas into an Agent. 
+    # Defines the strategies for loading tool schemas into an Agent.
     # By default, all tools are loaded without any filtering.
     @display {label: "Tool Loading Strategy"}
     ToolLoadingStrategy toolLoadingStrategy = NO_FILTER;
+
+    # Names of tools that require human approval before execution.
+    # When the LLM selects one of these tools, `run()` pauses and returns an `HITLResponse`.
+    # Call `run()` again with the same `sessionId` and an `HITLApproval` to resume.
+    @display {label: "HITL Tools"}
+    string[] hitlTools = [];
 |};
 
 # Represents an agent.
@@ -89,6 +95,9 @@ public isolated distinct class Agent {
     private final boolean verbose;
     private final string uniqueId = uuid:createRandomUuid();
     private final readonly & ToolSchema[] toolSchemas;
+    private final readonly & string[] hitlTools;
+    # Stores pending LLM responses keyed by sessionId for HITL resume.
+    private final map<json> pendingHitl = {};
 
     # Initialize an Agent.
     #
@@ -102,6 +111,7 @@ public isolated distinct class Agent {
         self.maxIter = maxIter is INFER_TOOL_COUNT ? config.tools.length() + 1 : maxIter;
         self.verbose = config.verbose;
         self.systemPrompt = config.systemPrompt.cloneReadOnly();
+        self.hitlTools = config.hitlTools.cloneReadOnly();
         Memory? memory = config.hasKey("memory") ? config?.memory : check new ShortTermMemory();
         do {
             self.functionCallAgent = check new FunctionCallAgent(config.model, config.tools, memory,
@@ -116,25 +126,30 @@ public isolated distinct class Agent {
     }
 
     # Executes the agent for a given user query.
+    # If the LLM selects a tool listed in `hitlTools`, execution pauses and returns an
+    # `HITLResponse` instead of the final answer. To resume, call `run()` again with the
+    # same `sessionId` and an `HITLApproval` containing the human decision.
     #
-    # **Note:** Calls to this function using the same session ID must be invoked sequentially by the caller, 
-    # as this operation is not thread-safe.
+    # **Note:** Calls using the same session ID must be sequential (not thread-safe).
     #
-    # + query - The natural language input provided to the agent
-    # + sessionId - The ID associated with the agent memory
-    # + context - The additional context that can be used during agent tool execution
-    # + td - Type descriptor specifying the expected return type format
-    # + return - The agent's response or an error
+    # + query - The natural language input (pass `""` when resuming a HITL execution)
+    # + sessionId - The session/thread ID for memory and HITL state
+    # + context - Additional context for tool execution
+    # + hitlApproval - Approval decision when resuming a paused HITL execution
+    # + td - Type descriptor for the return format (`string` or `Trace`)
+    # + return - The agent's answer, a `Trace`, an `HITLResponse` (if paused), or an error
     public isolated function run(@display {label: "Query"} string query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new,
-            typedesc<Trace|string> td = <>) returns td|Error = @java:Method {
+            HITLApproval? hitlApproval = (),
+            typedesc<Trace|HITLResponse|string> td = <>) returns td|Error = @java:Method {
         'class: "io.ballerina.stdlib.ai.Agent"
     } external;
 
     private isolated function runInternal(@display {label: "Query"} string query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
-            Context context = new, boolean withTrace = false) returns string|Trace|Error {
+            Context context = new, boolean withTrace = false,
+            HITLApproval? hitlApproval = ()) returns string|Trace|HITLResponse|Error {
         time:Utc startTime = time:utcNow();
         string executionId = uuid:createRandomUuid();
 
@@ -150,8 +165,36 @@ public isolated distinct class Agent {
         string systemPrompt = getFomatedSystemPrompt(self.systemPrompt);
         span.addSystemInstruction(systemPrompt);
 
+        // On resume: retrieve the pending LLM response saved from the previous HITL pause.
+        json? resumeLlmResponse = ();
+        if hitlApproval !is () {
+            lock {
+                if self.pendingHitl.hasKey(sessionId) {
+                    resumeLlmResponse = self.pendingHitl.get(sessionId).clone();
+                    _ = self.pendingHitl.remove(sessionId);
+                }
+            }
+        }
+
         ExecutionTrace executionTrace = self.functionCallAgent
-            .run(query, systemPrompt, self.maxIter, self.verbose, sessionId, context, executionId);
+            .run(query, systemPrompt, self.maxIter, self.verbose, sessionId, context, executionId,
+                 self.hitlTools, resumeLlmResponse, hitlApproval);
+
+        // If execution paused for HITL, persist the pending state and return HITLResponse.
+        readonly & HitlPause? hitlPause = executionTrace?.hitlPause.cloneReadOnly();
+        if hitlPause !is () {
+            lock {
+                self.pendingHitl[sessionId] = hitlPause.pendingLlmResponse;
+            }
+            log:printDebug("Agent execution paused for HITL",
+                executionId = executionId,
+                toolName = hitlPause.toolCall.name,
+                sessionId = sessionId
+            );
+            span.close();
+            return {toolCall: hitlPause.toolCall, sessionId};
+        }
+
         ChatUserMessage userMessage = {role: USER, content: query};
         Iteration[] iterations = executionTrace.iterations;
         FunctionCall[]? toolCalls = executionTrace.toolCalls.length() == 0 ? () : executionTrace.toolCalls;

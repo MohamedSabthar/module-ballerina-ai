@@ -43,11 +43,35 @@ public type ChatService distinct service object {
     resource function post chat(@http:Payload ChatReqMessage request) returns ChatRespMessage|error;
 };
 
+// Internal: stores the pending tool call when execution is paused for HITL approval.
+type HitlPause record {|
+    json pendingLlmResponse;
+    LlmToolResponse toolCall;
+|};
+
 type ExecutionTrace record {|
     (ExecutionResult|ExecutionError|Error)[] steps;
     string answer?;
     Iteration[] iterations;
     FunctionCall[] toolCalls;
+    HitlPause? hitlPause?;
+|};
+
+# Returned by `Agent.run()` when execution is paused waiting for human approval of a tool call.
+# Call `Agent.run()` again with the same `sessionId` and an `HITLApproval` to resume.
+public type HITLResponse record {|
+    # The session/thread ID — pass this back to `run()` to resume the execution
+    string sessionId;
+    # The tool call that triggered the pause
+    LlmToolResponse toolCall;
+|};
+
+# Approval or rejection decision passed to `Agent.run()` to resume a paused HITL execution.
+public type HITLApproval record {|
+    # `true` to approve and execute the pending tool call; `false` to reject it
+    boolean approved;
+    # Feedback sent to the LLM as the tool observation when `approved` is `false`
+    string feedback = "Tool call rejected by human reviewer.";
 |};
 
 # Configurations for controlling the behaviours when communicating with a remote HTTP endpoint.
