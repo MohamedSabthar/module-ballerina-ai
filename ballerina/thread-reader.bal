@@ -23,7 +23,7 @@ import ballerina/time;
 # The JSON must contain a root object with an array of threads, where each thread represents
 # a conversation thread with multiple traces of agent executions.
 #
-# Expected structure: `{ "id": "...", "description": "...", "description": "...", "threads": [...] }`
+# Expected structure: `{ "id": "...", "name": "...", "description": "...", "threads": [...] }`
 # where each thread in the array has `id`, `description`, and `traces` fields.
 #
 # + evalSetPath - Path to the JSON file containing the evaluation dataset
