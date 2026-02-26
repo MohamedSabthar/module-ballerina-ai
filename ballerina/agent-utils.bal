@@ -83,36 +83,12 @@ public type ToolOutput record {|
     anydata|error value;
 |};
 
-type BaseAgent distinct isolated object {
-    ModelProvider model;
-    ToolStore toolStore;
-    Memory memory;
-    boolean stateless;
-
-    # Parse the llm response and extract the tool to be executed.
-    #
-    # + llmResponse - Raw LLM response
-    # + return - A record containing the tool decided by the LLM, chat response or an error if the response is invalid
-    isolated function parseLlmResponse(json llmResponse) returns LlmToolResponse|LlmChatResponse|LlmInvalidGenerationError;
-
-    # Use LLM to decide the next tool/step.
-    #
-    # + progress - Execution progress with the current query and execution history
-    # + sessionId - The ID associated with the agent memory
-    # + return - LLM response containing the tool or chat response (or an error if the call fails)
-    isolated function selectNextTool(ExecutionProgress progress, string sessionId = DEFAULT_SESSION_ID) returns json|Error;
-
-    isolated function run(string query, string instruction, int maxIter = 5, boolean verbose = true,
-            string sessionId = DEFAULT_SESSION_ID, Context context = new, string executionId = DEFAULT_EXECUTION_ID)
-            returns ExecutionTrace;
-};
-
 # An executor to perform step-by-step execution of the agent.
 class Executor {
     *object:Iterable;
     private boolean isCompleted = false;
     private final string sessionId;
-    private final BaseAgent agent;
+    private final Agent agent;
     # Contains the current execution progress for the agent and the query
     public ExecutionProgress progress;
 
@@ -122,7 +98,7 @@ class Executor {
     # + query - Natural language query to be executed by the agent
     # + history - Execution history of the agent (This is used to continue an execution paused without completing)
     # + context - Contextual information to be used by the tools during the execution
-    isolated function init(BaseAgent agent, string sessionId, *ExecutionProgress progress) {
+    isolated function init(Agent agent, string sessionId, *ExecutionProgress progress) {
         self.sessionId = sessionId;
         self.agent = agent;
         self.progress = progress;
@@ -294,7 +270,7 @@ class Executor {
 # + sessionId - The ID associated with the memory
 # + executionId - Unique identifier for this execution
 # + return - Returns the execution steps tracing the agent's reasoning and outputs from the tools
-isolated function run(BaseAgent agent, string instruction, string query, int maxIter, boolean verbose,
+isolated function run(Agent agent, string instruction, string query, int maxIter, boolean verbose,
         string sessionId = DEFAULT_SESSION_ID, Context context = new, string executionId = DEFAULT_EXECUTION_ID)
         returns ExecutionTrace {
     time:Utc startTime = time:utcNow();
@@ -497,7 +473,7 @@ isolated function getObservationString(anydata|error observation) returns string
 #
 # + agent - Agent instance
 # + return - Array of tools registered with the agent
-public isolated function getTools(Agent agent) returns Tool[] => agent.functionCallAgent.toolStore.tools.toArray();
+public isolated function getTools(Agent agent) returns Tool[] => agent.toolStore.tools.toArray();
 
 isolated function updateMemory(Memory memory, string sessionId, ChatMessage[] messages) {
     error? updationStation = memory.update(sessionId, messages);

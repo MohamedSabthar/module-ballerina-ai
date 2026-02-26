@@ -36,15 +36,6 @@ public type SystemPrompt record {|
     string instructions;
 |};
 
-# Represents the different types of agents supported by the module.
-@display {label: "Agent Type"}
-public enum AgentType {
-    # Represents a ReAct agent
-    REACT_AGENT,
-    # Represents a function call agent
-    FUNCTION_CALL_AGENT
-}
-
 # Provides a set of configurations for the agent.
 @display {label: "Agent Configuration"}
 public type AgentConfiguration record {|
@@ -83,12 +74,21 @@ public type AgentConfiguration record {|
 
 # Represents an agent.
 public isolated distinct class Agent {
-    final FunctionCallAgent functionCallAgent;
     private final int maxIter;
     private final readonly & SystemPrompt systemPrompt;
     private final boolean verbose;
     private final string uniqueId = uuid:createRandomUuid();
     private final readonly & ToolSchema[] toolSchemas;
+
+    # Tool store to be used by the agent
+    final ToolStore toolStore;
+    # LLM model instance (should be a function call model)
+    final ModelProvider model;
+    # The memory associated with the agent.
+    final Memory memory;
+    # Represents if the agent is stateless or not.
+    final boolean stateless;
+    final ToolLoadingStrategy toolLoadingStrategy;
 
     # Initialize an Agent.
     #
@@ -104,10 +104,13 @@ public isolated distinct class Agent {
         self.systemPrompt = config.systemPrompt.cloneReadOnly();
         Memory? memory = config.hasKey("memory") ? config?.memory : check new ShortTermMemory();
         do {
-            self.functionCallAgent = check new FunctionCallAgent(config.model, config.tools, memory,
-                config.toolLoadingStrategy);
-            self.toolSchemas = self.functionCallAgent.toolStore.getToolSchema().cloneReadOnly();
-            span.addTools(self.functionCallAgent.toolStore.getToolsInfo());
+            self.toolStore = check new (...config.tools);
+            self.model = config.model;
+            self.memory = memory ?: check new ShortTermMemory();
+            self.stateless = memory is ();
+            self.toolLoadingStrategy = config.toolLoadingStrategy;
+            self.toolSchemas = self.toolStore.getToolSchema().cloneReadOnly();
+            span.addTools(self.toolStore.getToolsInfo());
             span.close();
         } on fail Error err {
             span.close(err);
@@ -139,9 +142,9 @@ public isolated distinct class Agent {
         string executionId = uuid:createRandomUuid();
 
         log:printDebug("Agent execution started",
-            executionId = executionId,
-            query = query,
-            sessionId = sessionId
+                executionId = executionId,
+                query = query,
+                sessionId = sessionId
         );
         observe:InvokeAgentSpan span = observe:createInvokeAgentSpan(self.systemPrompt.role);
         span.addId(self.uniqueId);
@@ -150,17 +153,16 @@ public isolated distinct class Agent {
         string systemPrompt = getFomatedSystemPrompt(self.systemPrompt);
         span.addSystemInstruction(systemPrompt);
 
-        ExecutionTrace executionTrace = self.functionCallAgent
-            .run(query, systemPrompt, self.maxIter, self.verbose, sessionId, context, executionId);
+        ExecutionTrace executionTrace = run(self, systemPrompt, query, self.maxIter, self.verbose, sessionId, context, executionId);
         ChatUserMessage userMessage = {role: USER, content: query};
         Iteration[] iterations = executionTrace.iterations;
         FunctionCall[]? toolCalls = executionTrace.toolCalls.length() == 0 ? () : executionTrace.toolCalls;
         do {
             string answer = check getAnswer(executionTrace, self.maxIter);
             log:printDebug("Agent execution completed successfully",
-                executionId = executionId,
-                steps = executionTrace.steps.toString(),
-                answer = answer
+                    executionId = executionId,
+                    steps = executionTrace.steps.toString(),
+                    answer = answer
             );
             span.addOutput(observe:TEXT, answer);
             span.close();
@@ -179,9 +181,9 @@ public isolated distinct class Agent {
                 : answer;
         } on fail Error err {
             log:printDebug("Agent execution failed",
-                err,
-                executionId = executionId,
-                steps = executionTrace.steps.toString()
+                    err,
+                    executionId = executionId,
+                    steps = executionTrace.steps.toString()
             );
             span.close(err);
 
@@ -199,6 +201,86 @@ public isolated distinct class Agent {
                 : err;
         }
     }
+
+
+
+    # Parse the function calling API response and extract the tool to be executed.
+    #
+    # + llmResponse - Raw LLM response
+    # + return - A record containing the tool decided by the LLM, chat response or an error if the response is invalid
+    isolated function parseLlmResponse(json llmResponse) returns LlmToolResponse|LlmChatResponse|LlmInvalidGenerationError {
+        if llmResponse is string {
+            return {content: llmResponse};
+        }
+        if llmResponse !is FunctionCall {
+            return error LlmInvalidGenerationError("Invalid response", llmResponse = llmResponse);
+        }
+        string? name = llmResponse.name;
+        if name is () {
+            return error LlmInvalidGenerationError("Missing name", name = llmResponse.name, arguments = llmResponse.arguments);
+        }
+        return {
+            name,
+            arguments: llmResponse.arguments,
+            id: llmResponse.id
+        };
+    }
+
+    # Use LLM to decide the next tool/step based on the function calling APIs.
+    #
+    # + progress - Execution progress with the current query and execution history
+    # + sessionId - The ID associated with the agent memory
+    # + return - LLM response containing the tool or chat response (or an error if the call fails)
+    isolated function selectNextTool(ExecutionProgress progress, string sessionId = DEFAULT_SESSION_ID) returns json|Error {
+        ChatMessage[] messages = createFunctionCallMessages(progress);
+        messages.unshift(...progress.history);
+        ToolLoadingStrategy toolLoadingStrategy = self.toolLoadingStrategy;
+        ChatMessage lastMessage = messages[messages.length() - 1];
+        ChatCompletionFunctions[] registeredTools = from Tool tool in self.toolStore.tools.toArray()
+            select {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.variables
+            };
+        ChatCompletionFunctions[] filteredTools = registeredTools;
+        if toolLoadingStrategy == LLM_FILTER && lastMessage is ChatUserMessage {
+            ChatCompletionFunctions[]? selectedTools = lazyLoadTools(cloneMessages(messages), registeredTools, self.model);
+            if selectedTools !is () {
+                filteredTools = selectedTools;
+            }
+        }
+
+        log:printDebug("Requesting tool selection from LLM",
+                executionId = progress.executionId,
+                sessionId = sessionId,
+                messages = messages.toString(),
+                availableTools = filteredTools.toString()
+        );
+
+        // TODO: Improve handling of multiple tool calls returned by the LLM.
+        // Currently, tool calls are executed sequentially in separate chat responses.
+        // Update the logic to execute all tool calls together and return a single response.
+        ChatAssistantMessage response = check self.model->chat(messages, filteredTools);
+        FunctionCall? toolCall = getFirstToolCall(response);
+
+        if toolCall is FunctionCall {
+            log:printDebug("LLM selected tool",
+                    executionId = progress.executionId,
+                    sessionId = sessionId,
+                    toolName = toolCall.name,
+                    toolArguments = toolCall.arguments
+            );
+            return toolCall;
+        }
+
+        log:printDebug("LLM provided chat response instead of tool call",
+                executionId = progress.executionId,
+                sessionId = sessionId,
+                response = response?.content
+        );
+        return response?.content;
+    }
+
 }
 
 isolated function getAnswer(ExecutionTrace executionTrace, int maxIter) returns string|Error {
