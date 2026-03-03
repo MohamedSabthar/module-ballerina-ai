@@ -75,7 +75,8 @@ public type AgentConfiguration record {|
 # Represents an agent.
 public isolated distinct class Agent {
     private final int maxIter;
-    private final readonly & SystemPrompt systemPrompt;
+    private final string systemPrompt;
+    private final string role;
     private final boolean verbose;
     private final string uniqueId = uuid:createRandomUuid();
     private final readonly & ToolSchema[] toolSchemas;
@@ -101,7 +102,8 @@ public isolated distinct class Agent {
         INFER_TOOL_COUNT|int maxIter = config.maxIter;
         self.maxIter = maxIter is INFER_TOOL_COUNT ? config.tools.length() + 1 : maxIter;
         self.verbose = config.verbose;
-        self.systemPrompt = config.systemPrompt.cloneReadOnly();
+        self.systemPrompt = getFomatedSystemPrompt(config.systemPrompt);
+        self.role = config.systemPrompt.role;
         Memory? memory = config.hasKey("memory") ? config?.memory : check new ShortTermMemory();
         do {
             self.toolStore = check new (...config.tools);
@@ -146,14 +148,13 @@ public isolated distinct class Agent {
                 query = query,
                 sessionId = sessionId
         );
-        observe:InvokeAgentSpan span = observe:createInvokeAgentSpan(self.systemPrompt.role);
+        observe:InvokeAgentSpan span = observe:createInvokeAgentSpan(self.role);
         span.addId(self.uniqueId);
         span.addSessionId(sessionId);
         span.addInput(query);
-        string systemPrompt = getFomatedSystemPrompt(self.systemPrompt);
-        span.addSystemInstruction(systemPrompt);
+        span.addSystemInstruction(self.systemPrompt);
 
-        ExecutionTrace executionTrace = run(self, systemPrompt, query, self.maxIter, self.verbose, sessionId, context, executionId);
+        ExecutionTrace executionTrace = self.runExecutor(query, sessionId, context, executionId);
         ChatUserMessage userMessage = {role: USER, content: query};
         Iteration[] iterations = executionTrace.iterations;
         FunctionCall[]? toolCalls = executionTrace.toolCalls.length() == 0 ? () : executionTrace.toolCalls;
@@ -201,8 +202,6 @@ public isolated distinct class Agent {
                 : err;
         }
     }
-
-
 
     # Parse the function calling API response and extract the tool to be executed.
     #
@@ -281,6 +280,130 @@ public isolated distinct class Agent {
         return response?.content;
     }
 
+    # Execute the agent for a given user's query.
+    #
+    # + query - Natural langauge commands to the agent  
+    # + context - Context values to be used by the agent to execute the task
+    # + sessionId - The ID associated with the memory
+    # + executionId - Unique identifier for this execution
+    # + return - Returns the execution steps tracing the agent's reasoning and outputs from the tools
+    isolated function runExecutor(string query, string sessionId = DEFAULT_SESSION_ID, Context context = new, string executionId = DEFAULT_EXECUTION_ID)
+        returns ExecutionTrace {
+        time:Utc startTime = time:utcNow();
+        Iteration[] iterations = [];
+        log:printDebug("Agent execution loop started",
+                executionId = executionId,
+                sessionId = sessionId,
+                maxIterations = self.maxIter,
+                tools = self.toolStore.tools.toString(),
+                isStateless = self.stateless
+        );
+
+        (ExecutionResult|ExecutionError|Error)[] steps = [];
+        string? content = ();
+        // Retrieve the conversation history from memory, update the system message at the start,
+        // and append the user message for the current interaction.
+        // After iterating and collecting execution steps in temporary memory,
+        // update the actual memory in a single batch, including the system prompt and user message for this interaction.
+        ChatMessage[]|MemoryError prevHistory = self.memory.get(sessionId);
+        if prevHistory is MemoryError {
+            log:printDebug("Failed to retrieve conversation history from memory",
+                    prevHistory,
+                    executionId = executionId,
+                    sessionId = sessionId
+            );
+        }
+        ChatMessage[] history = (prevHistory is ChatMessage[]) ? [...prevHistory] : [];
+        ChatSystemMessage systemMessage = {role: SYSTEM, content: self.systemPrompt};
+        if history.length() > 0 {
+            ChatMessage firstMessage = history[0];
+            if firstMessage is ChatSystemMessage && self.systemPrompt != toString(firstMessage.content) {
+                history[0] = systemMessage;
+            }
+        } else {
+            history.unshift(systemMessage);
+        }
+        ChatUserMessage userMessage = {role: USER, content: query};
+        history.push(userMessage);
+        ExecutionProgress progress = {instruction: self.systemPrompt, query, context, executionId, history};
+        Executor executor = new (self, sessionId, progress);
+        ChatMessage[] temporaryMemory = [systemMessage, userMessage];
+        ChatAssistantMessage? finalAssistantMessage = ();
+        int iter = 0;
+        foreach ExecutionResult|LlmChatResponse|ExecutionError|Error step in executor {
+            ChatAssistantMessage|ChatFunctionMessage|Error iterationOutput = getOutputOfIteration(step);
+            ChatMessage[] iterationHistory = buildCurrentIterationHistory(executor.progress, history);
+            if self.verbose {
+                verbosePrint(step, iter);
+            }
+            if iter == self.maxIter {
+                log:printDebug("Maximum iterations reached without final answer",
+                        executionId = executionId,
+                        iterations = iter,
+                        stepsCompleted = steps.length(),
+                        sessionId = sessionId
+                );
+                break;
+            }
+            if step is Error {
+                error? cause = step.cause();
+                log:printDebug("Error occurred during agent iteration",
+                        step,
+                        executionId = executionId,
+                        iteration = iter,
+                        sessionId = sessionId,
+                        cause = cause !is () ? cause.toString() : "none");
+                steps.push(step);
+                iterations.push({startTime, endTime: time:utcNow(), history: iterationHistory, output: iterationOutput});
+                break;
+            }
+            if step is LlmChatResponse {
+                content = step.content;
+                log:printDebug("Final answer generated by agent",
+                        executionId = executionId,
+                        iteration = iter,
+                        answer = step.content,
+                        sessionId = sessionId
+                    );
+                finalAssistantMessage = {role: ASSISTANT, content: step.content};
+                iterations.push({startTime, endTime: time:utcNow(), history: iterationHistory, output: iterationOutput});
+                break;
+            }
+            iter += 1;
+            log:printDebug("Agent iteration started",
+                    executionId = executionId,
+                    iteration = iter,
+                    maxIterations = self.maxIter,
+                    stepsCompleted = steps.length(),
+                    sessionId = sessionId
+            );
+
+            steps.push(step);
+            iterations.push({startTime, endTime: time:utcNow(), history: iterationHistory, output: iterationOutput});
+
+            startTime = time:utcNow();
+        }
+
+        ChatMessage[] intermediateFunctionCallMessages = createFunctionCallMessages(executor.progress);
+        temporaryMemory.push(...intermediateFunctionCallMessages);
+        if finalAssistantMessage is ChatAssistantMessage {
+            temporaryMemory.push(finalAssistantMessage);
+        }
+
+        // Batch update the memory with the user message, system message, and all intermediate steps from tool execution
+        updateMemory(self.memory, sessionId, temporaryMemory);
+        if self.stateless {
+            MemoryError? err = self.memory.delete(sessionId);
+            // Ignore this error since the stateless agent always relies on DefaultMessageWindowChatMemoryManager,  
+            // which never return an error.
+        }
+        // Collect all the tool call actions
+        FunctionCall[] toolCalls = from ExecutionStep step in executor.progress.executionSteps
+            let var llmResponse = step.llmResponse
+            where llmResponse is FunctionCall
+            select llmResponse;
+        return {steps, iterations, answer: content, toolCalls};
+    }
 }
 
 isolated function getAnswer(ExecutionTrace executionTrace, int maxIter) returns string|Error {
@@ -291,7 +414,7 @@ isolated function getAnswer(ExecutionTrace executionTrace, int maxIter) returns 
 isolated function constructError((ExecutionResult|ExecutionError|Error)[] steps, int maxIter) returns Error {
     if (steps.length() == maxIter) {
         return error MaxIterationExceededError("Maximum iteration limit exceeded while processing the query.",
-            steps = steps);
+                                                                                steps = steps);
     }
     // Validates whether the execution steps contain only one memory error.
     // If there is exactly one memory error, it is returned; otherwise, null is returned.

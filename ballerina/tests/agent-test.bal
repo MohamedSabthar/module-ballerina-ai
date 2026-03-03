@@ -75,10 +75,11 @@ function testAgentExecutorRun() returns error? {
 
 @test:Config
 function testAgentRunHavingErrorStep() returns error? {
-    Agent agent = check new (systemPrompt = {role: "Assistant", instructions: "Answer the questions"}, model = model, tools = [searchTool, calculatorTool]);
+    Agent agent = check new (systemPrompt = {role: "Assistant", instructions: "Answer the questions"},
+        model = model, tools = [searchTool, calculatorTool], maxIter = 5, verbose = true
+    );
     string query = "Random query";
-    ExecutionTrace trace = run(agent, instruction = "Answer the questions", query = query,
-            context = new, maxIter = 5, verbose = false);
+    ExecutionTrace trace = agent.runExecutor(query);
     test:assertEquals(trace.answer is (), true);
     test:assertEquals(trace.steps.length(), 1);
     test:assertEquals(trace.steps[0] is Error, true);
