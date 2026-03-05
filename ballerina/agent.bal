@@ -22,6 +22,8 @@ import ballerina/log;
 import ballerina/time;
 import ballerina/uuid;
 
+type ADDD (ExecutionResult|ExecutionError)[];
+
 const INFER_TOOL_COUNT = "INFER_TOOL_COUNT";
 
 # Represents the system prompt given to the agent.
@@ -278,7 +280,7 @@ public isolated distinct class Agent {
                 isStateless = self.stateless
         );
 
-        (ExecutionResult|ExecutionError|Error)[] steps = [];
+        (Error|ADDD)[] steps = [];
         string? content = ();
         // Retrieve the conversation history from memory, update the system message at the start,
         // and append the user message for the current interaction.
@@ -309,7 +311,7 @@ public isolated distinct class Agent {
         ChatAssistantMessage? finalAssistantMessage = ();
         int iter = 0;
         while iter < self.maxIter {
-            ExecutionResult|ExecutionError|Error|string step;
+            (ExecutionResult|ExecutionError)[]|Error|string step;
             // Reason
             log:printDebug("LLM reasoning started",
                     executionId = executionId,
@@ -331,10 +333,11 @@ public isolated distinct class Agent {
                     step = reason;
                 } else {
                     anydata observation;
-                    ExecutionResult|ExecutionError executionResult;
+                    (ExecutionResult|ExecutionError)[] executionResult = [];
                     FunctionCall[] functionCalls = reason;
+
+                    foreach var toolCall in functionCalls {
                         // TODO: for now let's get the first element, but need to allow multiple tool calls here
-                        FunctionCall toolCall = functionCalls[0];
                         string toolName = toolCall.name;
                         log:printDebug("Parsed LLM response as tool call",
                                 executionId = executionId,
@@ -350,7 +353,6 @@ public isolated distinct class Agent {
                         string? toolDescription = self.toolStore.getToolDescription(toolName);
                         if toolDescription is string {
                             span.addDescription(toolDescription);
-
                         }
                         span.addType(self.toolStore.isMcpTool(toolName) ? observe:EXTENTION : observe:FUNCTION);
                         span.addArguments(toolCall.arguments);
@@ -365,11 +367,13 @@ public isolated distinct class Agent {
                                 observation = "Tool execution failed. Retry with correct inputs.";
                             }
                             observation = string `${observation.toString()} <detail>${output.toString()}</detail>`;
-                            executionResult = {
+                            executionResult.push(
+                            {
                                 llmResponse: reason,
                                 'error: output,
                                 observation: observation.toString()
-                            };
+                            }
+                            );
 
                             log:printDebug("Tool execution resulted in error",
                                     executionId = progress.executionId,
@@ -389,19 +393,20 @@ public isolated distinct class Agent {
                                     toolName = toolName,
                                     output = observation
                             );
-                            executionResult = {
+                            executionResult.push({
                                 tool: toolCall,
                                 observation: value
-                            };
+                            });
 
                             span.addOutput(observation);
                             span.close();
                         }
-                    progress.executionSteps.push({
-                        // TODO: only passing the zeroth function call here
-                        llmResponse: toolCall,
-                        observation
-                    });
+                        progress.executionSteps.push({
+                            // TODO: only passing the zeroth function call here
+                            functionCall: toolCall,
+                            observation
+                        });
+                    }
                     step = executionResult;
                 }
             }
@@ -473,7 +478,7 @@ public isolated distinct class Agent {
         }
         // Collect all the tool call actions
         FunctionCall[] toolCalls = from ExecutionStep step in progress.executionSteps
-            let var llmResponse = step.llmResponse
+            let var llmResponse = step.functionCall
             where llmResponse is FunctionCall
             select llmResponse;
         return {steps, iterations, answer: content, toolCalls};
@@ -485,19 +490,20 @@ isolated function getAnswer(ExecutionTrace executionTrace, int maxIter) returns 
     return answer ?: constructError(executionTrace.steps, maxIter);
 }
 
-isolated function constructError((ExecutionResult|ExecutionError|Error)[] steps, int maxIter) returns Error {
+isolated function constructError((ADDD|Error)[] steps, int maxIter) returns Error {
     if (steps.length() == maxIter) {
         return error MaxIterationExceededError("Maximum iteration limit exceeded while processing the query.",
                                                                                 steps = steps);
     }
     // Validates whether the execution steps contain only one memory error.
     // If there is exactly one memory error, it is returned; otherwise, null is returned.
-    if steps.length() == 1 {
-        ExecutionResult|ExecutionError|Error step = steps[0];
-        if step is ExecutionError && step.'error is MemoryError {
-            return <MemoryError>step.'error;
-        }
-    }
+    // TODO: re enable this enable model
+    // if steps.length() == 1 {
+    //     ADDD|Error step = steps[0];
+    //     if step is ExecutionError && step.'error is MemoryError {
+    //         return <MemoryError>step.'error;
+    //     }
+    // }
     return error Error("Unable to obtain valid answer from the agent", steps = steps);
 }
 
@@ -526,9 +532,9 @@ type ExecutionProgress record {|
 |};
 
 # Execution step information
-public type ExecutionStep record {|
+type ExecutionStep record {|
     # Response generated by the LLM
-    json|FunctionCall llmResponse;
+    FunctionCall functionCall;
     # Observations produced by the tool during the execution
     anydata|error observation;
 |};
@@ -566,15 +572,16 @@ public type ToolOutput record {|
     anydata|error value;
 |};
 
-isolated function verbosePrint(ExecutionResult|ExecutionError|Error|string step, int iter) {
+isolated function verbosePrint((ExecutionResult|ExecutionError)[]|Error|string step, int iter) {
     io:println(string `${"\n\n"}Agent Iteration ${iter.toString()}`);
     if step is string {
         io:println(string `${"\n\n"}Final Answer: ${step}${"\n\n"}`);
         return;
     }
-    if step is ExecutionResult {
-        LlmToolResponse tool = step.tool;
-        io:println(string `Action:
+    if step is ExecutionResult[] {
+        foreach var item in step {
+            LlmToolResponse tool = item.tool;
+            io:println(string `Action:
     ${BACKTICKS}
     {
         ${ACTION_NAME_KEY}: ${tool.name},
@@ -582,28 +589,32 @@ isolated function verbosePrint(ExecutionResult|ExecutionError|Error|string step,
     }
     ${BACKTICKS}`);
 
-        anydata|error observation = step?.observation;
-        if observation is error {
-            io:println(string `${OBSERVATION_KEY} (Error): ${observation.toString()}`);
-        } else if observation !is () {
-            io:println(string `${OBSERVATION_KEY}: ${observation.toString()}`);
+            anydata|error observation = item?.observation;
+            if observation is error {
+                io:println(string `${OBSERVATION_KEY} (Error): ${observation.toString()}`);
+            } else if observation !is () {
+                io:println(string `${OBSERVATION_KEY}: ${observation.toString()}`);
+            }
+            return;
         }
-        return;
     }
-    if step is ExecutionError {
-        error? cause = step.'error.cause();
-        io:println(string `LLM Generation Error: 
+    if step is ExecutionError[] {
+        foreach var item in step {
+            error? cause = item.'error.cause();
+            io:println(string `LLM Generation Error: 
     ${BACKTICKS}
     {
-        message: ${step.'error.message()},
+        message: ${item.'error.message()},
         cause: ${(cause is error ? cause.message() : "Unspecified")},
-        llmResponse: ${step.llmResponse.toString()}
+        llmResponse: ${item.llmResponse.toString()}
     }
     ${BACKTICKS}`);
+        }
+
     }
 }
 
-isolated function getOutputOfIteration(ExecutionResult|ExecutionError|Error|string step)
+isolated function getOutputOfIteration(ADDD|Error|string step)
     returns ChatAssistantMessage|ChatFunctionMessage|Error {
     if step is Error {
         return step;
@@ -611,15 +622,20 @@ isolated function getOutputOfIteration(ExecutionResult|ExecutionError|Error|stri
     if step is string {
         return {role: ASSISTANT, content: step};
     }
-    if step is ExecutionError {
-        return step.'error;
+    foreach var item in step {
+        if item is ExecutionError {
+            return item.'error;
+        } else {
+            return {
+                role: FUNCTION,
+                name: item.tool.name,
+                id: item.tool.id,
+                content: getObservationString(item.observation)
+            };
+        }
     }
-    return {
-        role: FUNCTION,
-        name: step.tool.name,
-        id: step.tool.id,
-        content: getObservationString(step.observation)
-    };
+    // TODO: fix this;
+    return error Error("todo fix this");
 }
 
 isolated function buildCurrentIterationHistory(ExecutionProgress progress,

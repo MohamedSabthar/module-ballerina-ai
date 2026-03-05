@@ -20,9 +20,9 @@ import ballerina/log;
 isolated function createFunctionCallMessages(ExecutionProgress progress) returns ChatMessage[] {
     ChatMessage[] messages = [];
     foreach ExecutionStep step in progress.executionSteps {
-        FunctionCall|error functionCall = step.llmResponse.fromJsonWithType();
+        FunctionCall|error functionCall = step.functionCall.fromJsonWithType();
         if functionCall is error {
-            panic error Error("Badly formated history for function call agent", llmResponse = step.llmResponse);
+            panic error Error("Badly formated history for function call agent", llmResponse = step.functionCall);
         }
 
         messages.push({
