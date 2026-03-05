@@ -100,6 +100,7 @@ public isolated distinct class Agent {
         span.addId(self.uniqueId);
         span.addSystemInstructions(getFomatedSystemPrompt(config.systemPrompt));
 
+        // TODO: increase default maxIteration count here
         INFER_TOOL_COUNT|int maxIter = config.maxIter;
         self.maxIter = maxIter is INFER_TOOL_COUNT ? config.tools.length() + 1 : maxIter;
         self.verbose = config.verbose;
@@ -203,34 +204,12 @@ public isolated distinct class Agent {
         }
     }
 
-    # Parse the function calling API response and extract the tool to be executed.
-    #
-    # + llmResponse - Raw LLM response
-    # + return - A record containing the tool decided by the LLM, chat response or an error if the response is invalid
-    isolated function parseLlmResponse(json llmResponse) returns LlmToolResponse|LlmChatResponse|LlmInvalidGenerationError {
-        if llmResponse is string {
-            return {content: llmResponse};
-        }
-        if llmResponse !is FunctionCall {
-            return error LlmInvalidGenerationError("Invalid response", llmResponse = llmResponse);
-        }
-        string? name = llmResponse.name;
-        if name is () {
-            return error LlmInvalidGenerationError("Missing name", name = llmResponse.name, arguments = llmResponse.arguments);
-        }
-        return {
-            name,
-            arguments: llmResponse.arguments,
-            id: llmResponse.id
-        };
-    }
-
     # Use LLM to decide the next tool/step based on the function calling APIs.
     #
     # + progress - Execution progress with the current query and execution history
     # + sessionId - The ID associated with the agent memory
     # + return - LLM response containing the tool or chat response (or an error if the call fails)
-    isolated function selectNextTool(ExecutionProgress progress, string sessionId = DEFAULT_SESSION_ID) returns json|Error {
+    isolated function selectNextTools(ExecutionProgress progress, string sessionId = DEFAULT_SESSION_ID) returns FunctionCall[]|string|Error {
         ChatMessage[] messages = createFunctionCallMessages(progress);
         messages.unshift(...progress.history);
         ToolLoadingStrategy toolLoadingStrategy = self.toolLoadingStrategy;
@@ -260,14 +239,13 @@ public isolated distinct class Agent {
         // Currently, tool calls are executed sequentially in separate chat responses.
         // Update the logic to execute all tool calls together and return a single response.
         ChatAssistantMessage response = check self.model->chat(messages, filteredTools);
-        FunctionCall? toolCall = getFirstToolCall(response);
+        FunctionCall[]? toolCall = getToolCalls(response);
 
-        if toolCall is FunctionCall {
-            log:printDebug("LLM selected tool",
+        if toolCall is FunctionCall[] {
+            log:printDebug("LLM selected tools",
                     executionId = progress.executionId,
                     sessionId = sessionId,
-                    toolName = toolCall.name,
-                    toolArguments = toolCall.arguments
+                    tools = toolCall
             );
             return toolCall;
         }
@@ -277,7 +255,8 @@ public isolated distinct class Agent {
                 sessionId = sessionId,
                 response = response?.content
         );
-        return response?.content;
+        string? content = response?.content;
+        return content is string ? content : error LlmInvalidGenerationError("unable to obtain valid response from model");
     }
 
     # Execute the agent for a given user's query.
@@ -337,33 +316,34 @@ public isolated distinct class Agent {
                     sessionId = sessionId,
                     history = progress.executionSteps.toString()
             );
-            json|Error reason = self.selectNextTool(progress, sessionId);
+            FunctionCall[]|string|Error reason = self.selectNextTools(progress, sessionId);
             if reason is Error {
                 step = reason;
             } else {
                 // Act
-                LlmToolResponse|LlmChatResponse|LlmInvalidGenerationError parsedOutput = self.parseLlmResponse(reason);
-                if parsedOutput is LlmChatResponse {
+                if reason is string {
                     log:printDebug("Parsed LLM response as chat response",
                             executionId = executionId,
                             sessionId = sessionId,
-                            response = parsedOutput.content
+                            response = reason
                     );
-                    step = parsedOutput;
+                    // here LLM chat repsonse
+                    step = {content: reason};
                 } else {
                     anydata observation;
                     ExecutionResult|ExecutionError executionResult;
-                    if parsedOutput is LlmToolResponse {
-
-                        string toolName = parsedOutput.name;
+                    FunctionCall[] functionCalls = reason;
+                        // TODO: for now let's get the first element, but need to allow multiple tool calls here
+                        FunctionCall toolCall = functionCalls[0];
+                        string toolName = toolCall.name;
                         log:printDebug("Parsed LLM response as tool call",
                                 executionId = executionId,
                                 sessionId = sessionId,
                                 toolName = toolName,
-                                arguments = parsedOutput.arguments
+                                arguments = toolCall.arguments
                         );
                         observe:ExecuteToolSpan span = observe:createExecuteToolSpan(toolName);
-                        string? toolCallId = parsedOutput.id;
+                        string? toolCallId = toolCall.id;
                         if toolCallId is string {
                             span.addId(toolCallId);
                         }
@@ -373,9 +353,9 @@ public isolated distinct class Agent {
 
                         }
                         span.addType(self.toolStore.isMcpTool(toolName) ? observe:EXTENTION : observe:FUNCTION);
-                        span.addArguments(parsedOutput.arguments);
+                        span.addArguments(toolCall.arguments);
 
-                        ToolOutput|ToolExecutionError|LlmInvalidGenerationError output = self.toolStore.execute(parsedOutput, context);
+                        ToolOutput|ToolExecutionError|LlmInvalidGenerationError output = self.toolStore.execute(toolCall, context);
                         if output is Error {
                             if output is ToolNotFoundError {
                                 observation = "Tool is not found. Please check the tool name and retry.";
@@ -398,7 +378,7 @@ public isolated distinct class Agent {
                                     toolName = toolName
                             );
 
-                            Error toolExecutionError = error(observation.toString(), details = {parsedOutput});
+                            Error toolExecutionError = error(observation.toString(), details = {toolCall});
                             span.close(toolExecutionError);
                         } else {
                             anydata|error value = output.value;
@@ -410,28 +390,16 @@ public isolated distinct class Agent {
                                     output = observation
                             );
                             executionResult = {
-                                tool: parsedOutput,
+                                tool: toolCall,
                                 observation: value
                             };
 
                             span.addOutput(observation);
                             span.close();
                         }
-                    } else {
-                        log:printDebug("Failed to parse LLM response as valid tool or chat",
-                                executionId = executionId,
-                                sessionId = sessionId,
-                                errorMessage = parsedOutput.message()
-                        );
-                        observation = "Tool extraction failed due to invalid JSON_BLOB. Retry with correct JSON_BLOB.";
-                        executionResult = {
-                            llmResponse: reason,
-                            'error: parsedOutput,
-                            observation: observation.toString()
-                        };
-                    }
                     progress.executionSteps.push({
-                        llmResponse: reason,
+                        // TODO: only passing the zeroth function call here
+                        llmResponse: toolCall,
                         observation
                     });
                     step = executionResult;
