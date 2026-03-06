@@ -51,7 +51,7 @@ public type Iteration record {|
     # History of chat messages up to this iteration
     ChatMessage[] history;
     # Output produced by the agent in this iteration
-    ChatAssistantMessage|ChatFunctionMessage|Error output;
+    PrallelCallOutput|ChatAssistantMessage|ChatFunctionMessage|Error output;
     # Start time of the iteration
     time:Utc startTime;
     # End time of the iteration

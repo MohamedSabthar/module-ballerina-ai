@@ -23,6 +23,10 @@ import ballerina/log;
 import ballerina/time;
 import ballerina/uuid;
 
+type ParallelToolExecutionResult (ExecutionResult|ExecutionError)[];
+
+type PrallelCallOutput (ChatFunctionMessage|Error)[];
+
 const INFER_TOOL_COUNT = "INFER_TOOL_COUNT";
 
 # Represents the system prompt given to the agent.
@@ -279,7 +283,7 @@ public isolated distinct class Agent {
                 isStateless = self.stateless
         );
 
-        (ExecutionResult|ExecutionError|Error)[] steps = [];
+        (ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error)[] steps = [];
         string? content = ();
         // Retrieve the conversation history from memory, update the system message at the start,
         // and append the user message for the current interaction.
@@ -310,7 +314,7 @@ public isolated distinct class Agent {
         ChatAssistantMessage? finalAssistantMessage = ();
         int iter = 0;
         while iter < self.maxIter {
-            ExecutionResult|ExecutionError|Error|string step;
+            ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error|string step;
             // Reason
             log:printDebug("LLM reasoning started",
                     executionId = executionId,
@@ -331,25 +335,32 @@ public isolated distinct class Agent {
                     // here LLM chat repsonse
                     step = reason;
                 } else {
+                    ParallelToolExecutionResult parallelToolResult = [];
                     FunctionCall[] functionCalls = reason;
-                    // // TODO: for now let's get the first element, but need to allow multiple tool calls here
-                    FunctionCall toolCall = functionCalls[0];
-                    toolCall.id = toolCall.id is () ? uuid:createRandomUuid() : toolCall.id;
-                    string toolId = toolCall.id.toString();
                     map<[FunctionCall, future<ExecutionResult|ExecutionError>]> futures = {};
-                    future<ExecutionResult|ExecutionError> executionResult = start self.getExecutionResult(toolCall.clone(), executionId, sessionId, context);
-                    futures[toolId] = [toolCall, executionResult];
 
-                    (ExecutionResult|ExecutionError) waitResult = checkpanic wait futures.get(toolId)[1];
+                    // // TODO: for now let's get the first element, but need to allow multiple tool calls here
+                    foreach FunctionCall toolCall in functionCalls {
+                        toolCall.id = toolCall.id is () ? uuid:createRandomUuid() : toolCall.id;
+                        string toolId = toolCall.id.toString();
+                        future<ExecutionResult|ExecutionError> executionResult = start self.getExecutionResult(toolCall.clone(), executionId, sessionId, context);
+                        futures[toolId] = [toolCall, executionResult];
+                    }
 
-                    progress.executionSteps.push({
-                        llmResponse: futures.get(toolId)[0],
-                        observation: waitResult is ExecutionResult ? waitResult.observation : waitResult.observation
-                    });
-                    step = waitResult;
+                    foreach [FunctionCall, future<ExecutionResult|ExecutionError>] [toolRec, executionFuture] in futures {
+                        (ExecutionResult|ExecutionError) waitResult = checkpanic wait executionFuture;
+                        parallelToolResult.push(waitResult);
+
+                        progress.executionSteps.push({
+                            llmResponse: toolRec,
+                            observation: waitResult is ExecutionResult ? waitResult.observation : waitResult.observation
+                        });
+                    }
+
+                    step = parallelToolResult;
                 }
             }
-            ChatAssistantMessage|ChatFunctionMessage|Error iterationOutput = getOutputOfIteration(step);
+            PrallelCallOutput|ChatAssistantMessage|ChatFunctionMessage|Error iterationOutput = getOutputOfIteration(step);
             ChatMessage[] iterationHistory = buildCurrentIterationHistory(progress, history);
             if self.verbose {
                 verbosePrint(step, iter);
@@ -500,7 +511,7 @@ isolated function getAnswer(ExecutionTrace executionTrace, int maxIter) returns 
     return answer ?: constructError(executionTrace.steps, maxIter);
 }
 
-isolated function constructError((ExecutionResult|ExecutionError|Error)[] steps, int maxIter) returns Error {
+isolated function constructError((ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error)[] steps, int maxIter) returns Error {
     if (steps.length() == maxIter) {
         return error MaxIterationExceededError("Maximum iteration limit exceeded while processing the query.",
                                                                                 steps = steps);
@@ -508,7 +519,14 @@ isolated function constructError((ExecutionResult|ExecutionError|Error)[] steps,
     // Validates whether the execution steps contain only one memory error.
     // If there is exactly one memory error, it is returned; otherwise, null is returned.
     if steps.length() == 1 {
-        ExecutionResult|ExecutionError|Error step = steps[0];
+        ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error step = steps[0];
+        if step is ParallelToolExecutionResult {
+            foreach var item in step {
+                if item is ExecutionError && item.'error is MemoryError {
+                    return <MemoryError>item.'error;
+                }
+            }
+        }
         if step is ExecutionError && step.'error is MemoryError {
             return <MemoryError>step.'error;
         }
@@ -581,12 +599,7 @@ public type ToolOutput record {|
     anydata|error value;
 |};
 
-isolated function verbosePrint(ExecutionResult|ExecutionError|Error|string step, int iter) {
-    io:println(string `${"\n\n"}Agent Iteration ${iter.toString()}`);
-    if step is string {
-        io:println(string `${"\n\n"}Final Answer: ${step}${"\n\n"}`);
-        return;
-    }
+isolated function printExecution(ExecutionResult|ExecutionError step) {
     if step is ExecutionResult {
         LlmToolResponse tool = step.tool;
         io:println(string `Action:
@@ -618,8 +631,23 @@ isolated function verbosePrint(ExecutionResult|ExecutionError|Error|string step,
     }
 }
 
-isolated function getOutputOfIteration(ExecutionResult|ExecutionError|Error|string step)
-    returns ChatAssistantMessage|ChatFunctionMessage|Error {
+isolated function verbosePrint(ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error|string step, int iter) {
+    io:println(string `${"\n\n"}Agent Iteration ${iter.toString()}`);
+    if step is ParallelToolExecutionResult {
+        step.forEach(item => printExecution(item));
+        return;
+    }
+    if step is string {
+        io:println(string `${"\n\n"}Final Answer: ${step}${"\n\n"}`);
+        return;
+    }
+    if step is ExecutionResult|ExecutionError {
+        printExecution(step);
+    }
+}
+
+isolated function getOutputOfIteration(ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error|string step)
+    returns ChatAssistantMessage|ChatFunctionMessage|Error|PrallelCallOutput {
     if step is Error {
         return step;
     }
@@ -628,6 +656,23 @@ isolated function getOutputOfIteration(ExecutionResult|ExecutionError|Error|stri
     }
     if step is ExecutionError {
         return step.'error;
+    }
+    if step is ParallelToolExecutionResult {
+        PrallelCallOutput result = [];
+        foreach var item in step {
+            if item is ExecutionError {
+                result.push(item.'error);
+            } else {
+                ChatFunctionMessage msg = {
+                    role: FUNCTION,
+                    name: item.tool.name,
+                    id: item.tool.id,
+                    content: getObservationString(item.observation)
+                };
+                result.push(msg);
+            }
+        }
+        return result;
     }
     return {
         role: FUNCTION,
