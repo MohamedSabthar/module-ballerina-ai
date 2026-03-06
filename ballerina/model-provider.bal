@@ -214,7 +214,7 @@ public isolated distinct client class Wso2ModelProvider {
             temperature: self.temperature
         };
         if tools.length() > 0 {
-            request.functions = tools;
+            request.tools = tools.'map(e => <intelligence:ChatCompletionTool>{'function: {name: e.name, description: e.description, parameters: e.parameters is () ? {} : <record {}>e.parameters}, 'type: "function"});
             span.addTools(tools);
         }
         intelligence:CreateChatCompletionResponse|error response = self.llmClient->/chat/completions.post(request, headers = {
@@ -252,17 +252,24 @@ public isolated distinct client class Wso2ModelProvider {
 
         ChatAssistantMessage chatAssistantMessage = {role: ASSISTANT, content: message?.content};
         intelligence:ChatCompletionFunctionCall? functionCall = message?.functionCall;
-        if functionCall is () {
+        intelligence:ChatCompletionMessageToolCall[]? toolCalls = message?.toolCalls;
+        if functionCall is () && toolCalls is () {
             span.addOutputMessages(chatAssistantMessage);
             span.close();
             return chatAssistantMessage;
         }
-        FunctionCall|Error toolCall = check self.mapToFunctionCall(functionCall);
+        intelligence:ChatCompletionFunctionCall|intelligence:ChatCompletionMessageToolCall[] toolResponse = [];
+        if toolCalls is intelligence:ChatCompletionMessageToolCall[] {
+            toolResponse = toolCalls;
+        } else if functionCall is intelligence:ChatCompletionFunctionCall {
+            toolResponse = functionCall;
+        }
+        FunctionCall[]|Error toolCall = check self.mapToFunctionCall(toolResponse);
         if toolCall is Error {
             span.close(toolCall);
             return toolCall;
         }
-        chatAssistantMessage.toolCalls = [toolCall];
+        chatAssistantMessage.toolCalls = toolCall;
         span.addOutputType(observe:TEXT);
         span.addOutputMessages(chatAssistantMessage);
         span.close();
@@ -314,12 +321,19 @@ public isolated distinct client class Wso2ModelProvider {
         return chatCompletionRequestMessages;
     }
 
-    private isolated function mapToFunctionCall(intelligence:ChatCompletionFunctionCall functionCall)
-    returns FunctionCall|LlmError {
+    private isolated function mapToFunctionCall(intelligence:ChatCompletionFunctionCall|intelligence:ChatCompletionMessageToolCall[] functionCall)
+    returns FunctionCall[]|LlmError {
         do {
-            json jsonArgs = check functionCall.arguments.fromJsonString();
-            map<json>? arguments = check jsonArgs.cloneWithType();
-            return {name: functionCall.name, arguments};
+            if functionCall is intelligence:ChatCompletionFunctionCall {
+                json jsonArgs = check functionCall.arguments.fromJsonString();
+                map<json>? arguments = check jsonArgs.cloneWithType();
+                return [{name: functionCall.name, arguments}];
+            }
+            return functionCall.'map(e => <FunctionCall>{
+                name: e.'function.name,
+                arguments: check (check e.'function.arguments.fromJsonString()).cloneWithType(),
+                id: e.id
+            });
         } on fail error e {
             return error LlmError("Invalid or malformed arguments received in function call response.", e);
         }
