@@ -25,7 +25,7 @@ import ballerina/uuid;
 
 type ParallelToolExecutionResult (ExecutionResult|ExecutionError)[];
 
-type PrallelCallOutput (ChatFunctionMessage|Error)[];
+type ParallelCallOutput (ChatFunctionMessage|Error)[];
 
 const INFER_TOOL_COUNT = "INFER_TOOL_COUNT";
 
@@ -103,13 +103,12 @@ public isolated distinct class Agent {
     public isolated function init(@display {label: "Agent Configuration"} *AgentConfiguration config) returns Error? {
         observe:CreateAgentSpan span = observe:createCreateAgentSpan(config.systemPrompt.role);
         span.addId(self.uniqueId);
-        span.addSystemInstructions(getFomatedSystemPrompt(config.systemPrompt));
+        span.addSystemInstructions(getFormattedSystemPrompt(config.systemPrompt));
 
-        // TODO: increase default maxIteration count here
         INFER_TOOL_COUNT|int maxIter = config.maxIter;
         self.maxIter = maxIter is INFER_TOOL_COUNT ? config.tools.length() + 1 : maxIter;
         self.verbose = config.verbose;
-        self.systemPrompt = getFomatedSystemPrompt(config.systemPrompt);
+        self.systemPrompt = getFormattedSystemPrompt(config.systemPrompt);
         self.role = config.systemPrompt.role;
         Memory? memory = config.hasKey("memory") ? config?.memory : check new ShortTermMemory();
         do {
@@ -240,9 +239,6 @@ public isolated distinct class Agent {
                 availableTools = filteredTools.toString()
         );
 
-        // TODO: Improve handling of multiple tool calls returned by the LLM.
-        // Currently, tool calls are executed sequentially in separate chat responses.
-        // Update the logic to execute all tool calls together and return a single response.
         ChatAssistantMessage response = check self.model->chat(messages, filteredTools);
         FunctionCall[]? toolCall = getToolCalls(response);
 
@@ -335,44 +331,13 @@ public isolated distinct class Agent {
                     // here LLM chat repsonse
                     step = reason;
                 } else {
-                    ParallelToolExecutionResult parallelToolResult = [];
-                    FunctionCall[] functionCalls = reason;
-                    map<[FunctionCall, future<ExecutionResult|ExecutionError>]> futures = {};
-
-                    // // TODO: for now let's get the first element, but need to allow multiple tool calls here
-                    foreach FunctionCall toolCall in functionCalls {
-                        toolCall.id = toolCall.id is () ? uuid:createRandomUuid() : toolCall.id;
-                        string toolId = toolCall.id.toString();
-                        future<ExecutionResult|ExecutionError> executionResult = start self.getExecutionResult(toolCall.clone(), executionId, sessionId, context);
-                        futures[toolId] = [toolCall, executionResult];
-                    }
-
-                    foreach [FunctionCall, future<ExecutionResult|ExecutionError>] [toolRec, executionFuture] in futures {
-                        (ExecutionResult|ExecutionError) waitResult = checkpanic wait executionFuture;
-                        parallelToolResult.push(waitResult);
-
-                        progress.executionSteps.push({
-                            llmResponse: toolRec,
-                            observation: waitResult is ExecutionResult ? waitResult.observation : waitResult.observation
-                        });
-                    }
-
-                    step = parallelToolResult;
+                    step = self.executeParallelTools(reason, progress, executionId, sessionId, context);
                 }
             }
-            PrallelCallOutput|ChatAssistantMessage|ChatFunctionMessage|Error iterationOutput = getOutputOfIteration(step);
+            ParallelCallOutput|ChatAssistantMessage|ChatFunctionMessage|Error iterationOutput = getOutputOfIteration(step);
             ChatMessage[] iterationHistory = buildCurrentIterationHistory(progress, history);
             if self.verbose {
                 verbosePrint(step, iter);
-            }
-            if iter == self.maxIter {
-                log:printDebug("Maximum iterations reached without final answer",
-                        executionId = executionId,
-                        iterations = iter,
-                        stepsCompleted = steps.length(),
-                        sessionId = sessionId
-                );
-                break;
             }
             if step is Error {
                 error? cause = step.cause();
@@ -423,8 +388,8 @@ public isolated distinct class Agent {
         updateMemory(self.memory, sessionId, temporaryMemory);
         if self.stateless {
             MemoryError? err = self.memory.delete(sessionId);
-            // Ignore this error since the stateless agent always relies on DefaultMessageWindowChatMemoryManager,  
-            // which never return an error.
+            // Ignore this error since the stateless agent always relies on DefaultMessageWindowChatMemoryManager,
+            // which never returns an error.
         }
         // Collect all the tool call actions
         FunctionCall[] toolCalls = from ExecutionStep step in progress.executionSteps
@@ -434,12 +399,44 @@ public isolated distinct class Agent {
         return {steps, iterations, answer: content, toolCalls};
     }
 
+    private isolated function executeParallelTools(
+            FunctionCall[] toolCalls,
+            ExecutionProgress progress,
+            string executionId,
+            string sessionId,
+            Context context
+    ) returns ParallelToolExecutionResult {
+        ParallelToolExecutionResult parallelToolResult = [];
+        map<[FunctionCall, future<ExecutionResult|ExecutionError>]> futures = {};
+
+        foreach FunctionCall toolCall in toolCalls {
+            toolCall.id = toolCall.id is () ? uuid:createRandomUuid() : toolCall.id;
+            string toolId = toolCall.id.toString();
+            future<ExecutionResult|ExecutionError> executionFuture = start self.getExecutionResult(toolCall.clone(), executionId, sessionId, context);
+            futures[toolId] = [toolCall, executionFuture];
+        }
+
+        foreach [FunctionCall, future<ExecutionResult|ExecutionError>] [toolRec, executionFuture] in futures {
+            ExecutionResult|ExecutionError|error waitResult = trap wait executionFuture;
+            if waitResult is error {
+                ExecutionError execErr = {
+                    llmResponse: toolRec,
+                    'error: error LlmInvalidGenerationError("Unexpected error during tool execution", cause = waitResult),
+                    observation: "Tool execution failed unexpectedly."
+                };
+                parallelToolResult.push(execErr);
+                progress.executionSteps.push({llmResponse: toolRec, observation: execErr.observation});
+            } else {
+                parallelToolResult.push(waitResult);
+                progress.executionSteps.push({llmResponse: toolRec, observation: waitResult.observation});
+            }
+        }
+
+        return parallelToolResult;
+    }
+
     isolated function getExecutionResult(FunctionCall toolCall, string executionId, string sessionId, Context ctx) returns ExecutionResult|ExecutionError {
-        anydata observation;
         ExecutionResult|ExecutionError executionResult;
-        // FunctionCall[] functionCalls = reason;
-        // // TODO: for now let's get the first element, but need to allow multiple tool calls here
-        // FunctionCall toolCall = functionCalls[0];
         string toolName = toolCall.name;
         log:printDebug("Parsed LLM response as tool call",
                 executionId = executionId,
@@ -462,32 +459,33 @@ public isolated distinct class Agent {
 
         ToolOutput|ToolExecutionError|LlmInvalidGenerationError output = self.toolStore.execute(toolCall, ctx);
         if output is Error {
+            string errorMessage;
             if output is ToolNotFoundError {
-                observation = "Tool is not found. Please check the tool name and retry.";
+                errorMessage = "Tool is not found. Please check the tool name and retry.";
             } else if output is ToolInvalidInputError {
-                observation = "Tool execution failed due to invalid inputs. Retry with correct inputs.";
+                errorMessage = "Tool execution failed due to invalid inputs. Retry with correct inputs.";
             } else {
-                observation = "Tool execution failed. Retry with correct inputs.";
+                errorMessage = "Tool execution failed. Retry with correct inputs.";
             }
-            observation = string `${observation.toString()} <detail>${output.toString()}</detail>`;
+            string errorObservation = string `${errorMessage} <detail>${output.toString()}</detail>`;
             executionResult = {
                 llmResponse: toolCall,
                 'error: output,
-                observation: observation.toString()
+                observation: errorObservation
             };
 
             log:printDebug("Tool execution resulted in error",
                     executionId = executionId,
-                    observation = observation.toString(),
+                    observation = errorObservation,
                     sessionId = sessionId,
                     toolName = toolName
                             );
 
-            Error toolExecutionError = error(observation.toString(), details = {toolCall});
+            Error toolExecutionError = error(errorObservation, details = {toolCall});
             span.close(toolExecutionError);
         } else {
             anydata|error value = output.value;
-            observation = value is error ? value.toString() : value;
+            anydata observation = value is error ? value.toString() : value;
             log:printDebug("Tool execution successful",
                     executionId = executionId,
                     sessionId = sessionId,
@@ -534,7 +532,7 @@ isolated function constructError((ParallelToolExecutionResult|ExecutionResult|Ex
     return error Error("Unable to obtain valid answer from the agent", steps = steps);
 }
 
-isolated function getFomatedSystemPrompt(SystemPrompt systemPrompt) returns string {
+isolated function getFormattedSystemPrompt(SystemPrompt systemPrompt) returns string {
     return string `# Role  
 ${systemPrompt.role}  
 
@@ -618,9 +616,8 @@ isolated function printExecution(ExecutionResult|ExecutionError step) {
         }
         return;
     }
-    if step is ExecutionError {
-        error? cause = step.'error.cause();
-        io:println(string `LLM Generation Error: 
+    error? cause = step.'error.cause();
+    io:println(string `LLM Generation Error:
     ${BACKTICKS}
     {
         message: ${step.'error.message()},
@@ -628,7 +625,6 @@ isolated function printExecution(ExecutionResult|ExecutionError step) {
         llmResponse: ${step.llmResponse.toString()}
     }
     ${BACKTICKS}`);
-    }
 }
 
 isolated function verbosePrint(ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error|string step, int iter) {
@@ -647,7 +643,7 @@ isolated function verbosePrint(ParallelToolExecutionResult|ExecutionResult|Execu
 }
 
 isolated function getOutputOfIteration(ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error|string step)
-    returns ChatAssistantMessage|ChatFunctionMessage|Error|PrallelCallOutput {
+    returns ChatAssistantMessage|ChatFunctionMessage|Error|ParallelCallOutput {
     if step is Error {
         return step;
     }
@@ -658,7 +654,7 @@ isolated function getOutputOfIteration(ParallelToolExecutionResult|ExecutionResu
         return step.'error;
     }
     if step is ParallelToolExecutionResult {
-        PrallelCallOutput result = [];
+        ParallelCallOutput result = [];
         foreach var item in step {
             if item is ExecutionError {
                 result.push(item.'error);
@@ -775,7 +771,7 @@ isolated function getSelectedToolsFromAssistantMessage(ChatAssistantMessage assi
         string rawResponse = assistantMsg.content ?: "[]";
         string cleanedJson = regexp:replaceAll(check regexp:fromString("```"), rawResponse, "");
         return check cleanedJson.fromJsonStringWithType();
-    } on fail error e {
+    } on fail {
         // In case of failure try to load all tools and ignore the error
         return;
     }

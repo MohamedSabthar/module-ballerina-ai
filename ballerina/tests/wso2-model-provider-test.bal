@@ -31,6 +31,36 @@ service on new http:Listener(MOCK_CHAT_PORT) {
         if Authorization != "Bearer test-token" {
             return error("invalid authorization token");
         }
+        json|error tools = payload.tools;
+        if tools is json[] && tools.length() > 0 {
+            return {
+                id: "resp-func-call",
+                'object: "chat.completion",
+                created: 1700000000,
+                model: "gpt-4o-mini",
+                choices: [
+                    {
+                        index: 0,
+                        message: {
+                            role: "assistant",
+                            content: (),
+                            tool_calls: [
+                                {
+                                    'function: {
+                                        name: "searchFunction",
+                                        arguments: "{\"query\":\"test\"}"
+                                    },
+                                    id: "test-id",
+                                    'type: "function"
+                                }
+                            ]
+                        },
+                        finish_reason: "function_call"
+                    }
+                ],
+                usage: {prompt_tokens: 5, completion_tokens: 10, total_tokens: 15}
+            };
+        }
         json|error functions = payload.functions;
         if functions is json[] && functions.length() > 0 {
             return {
