@@ -289,7 +289,7 @@ isolated function registerTool(map<Tool & readonly> toolMap, ToolConfig[] tools)
 
         map<json>|error? variables = tool.parameters.cloneWithType();
         if variables is error {
-            return error Error("Unable to regesiter tool", variables);
+            return error Error("Unable to register tool", variables);
         }
         map<json> constants = {};
 

@@ -350,9 +350,6 @@ isolated function convertMessageToJson(ChatMessage[]|ChatMessage messages) retur
     if messages is ChatMessage[] {
         return messages.'map(msg => msg is ChatUserMessage|ChatSystemMessage ? convertMessageToJson(msg) : msg);
     }
-    if messages is ChatUserMessage|ChatSystemMessage {
-
-    }
     return messages !is ChatUserMessage|ChatSystemMessage ? messages :
         {role: messages.role, content: getChatMessageStringContent(messages.content), name: messages.name};
 }
