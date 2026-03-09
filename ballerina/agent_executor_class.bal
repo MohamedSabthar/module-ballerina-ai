@@ -19,16 +19,16 @@ import ballerina/time;
 # Manages the agent execution loop and LLM reasoning.
 isolated class AgentExecutor {
     private final ModelProvider model;
-    private final ToolRegistry ToolRegistry;
+    private final ToolRegistry toolRegistry;
     private final ToolExecutionHandler toolHandler;
     private final ToolLoadingStrategy toolLoadingStrategy;
     private final int maxIter;
     private final boolean verbose;
 
-    isolated function init(ModelProvider model, ToolRegistry ToolRegistry, ToolExecutionHandler toolHandler,
+    isolated function init(ModelProvider model, ToolRegistry toolRegistry, ToolExecutionHandler toolHandler,
             ToolLoadingStrategy toolLoadingStrategy, int maxIter, boolean verbose) {
         self.model = model;
-        self.ToolRegistry = ToolRegistry;
+        self.toolRegistry = toolRegistry;
         self.toolHandler = toolHandler;
         self.toolLoadingStrategy = toolLoadingStrategy;
         self.maxIter = maxIter;
@@ -129,7 +129,7 @@ isolated class AgentExecutor {
         ChatMessage[] messages = createFunctionCallMessages(progress);
         messages.unshift(...progress.history);
         ChatCompletionFunctions[] filteredTools = getFilteredTools(
-                self.ToolRegistry, self.toolLoadingStrategy, messages, self.model);
+                self.toolRegistry, self.toolLoadingStrategy, messages, self.model);
 
         logToolSelectionRequest(progress.executionId, sessionId,
                 messages.toString(), filteredTools.toString());

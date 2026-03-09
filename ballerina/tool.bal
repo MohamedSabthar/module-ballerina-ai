@@ -14,16 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import ballerina/http;
-import ballerina/lang.regexp;
-import ballerina/log;
-
-# Represent the execution result of a tool.
-public type ToolExecutionResult record {|
-    # Return value of the tool
-    any|error result;
-|};
-
 # This is the tool used by LLMs during reasoning.
 # This tool is same as the Tool record, but it has a clear separation between the variables that should be generated with the help of the LLMs and the constants that are defined by the users. 
 public type Tool record {|
@@ -54,9 +44,7 @@ public isolated class ToolRegistry {
     # + tools - A list of tools that are available to the LLM
     # + return - An error if the tool is already registered
     public isolated function init((BaseToolKit|ToolConfig|FunctionTool)... tools) returns Error? {
-        log:printDebug("Registering tools",
-            tools = tools.toString()
-        );
+        logToolRegistration(tools.toString());
 
         if tools.length() == 0 {
             self.tools = {};
@@ -85,12 +73,10 @@ public isolated class ToolRegistry {
         check registerTool(toolMap, toolList);
         self.tools = toolMap.cloneReadOnly();
 
-        log:printDebug("Tool registration completed",
-            tools = toolList.toString()
-        );
+        logToolRegistrationCompleted(toolList.toString());
     }
 
-    # execute the tool decided by the LLM.
+    # Execute the tool decided by the LLM.
     #
     # + action - Action object that contains the tool name and inputs
     # + context - Additional context for the tool execution
@@ -100,84 +86,35 @@ public isolated class ToolRegistry {
         string name = action.name;
         map<json>? inputs = action.arguments;
         if !self.tools.hasKey(name) {
-            log:printDebug("Tool not found",
-                toolName = name,
-                availableTools = self.tools.keys()
-            );
+            logToolNotFound(name, self.tools.keys());
             return error ToolNotFoundError("Cannot find the tool.", toolName = name,
                 instruction = string `Tool "${name}" does not exists.`
                 + string ` Use a tool from the list: ${self.tools.keys().toString()}}`);
         }
-        map<json>|error inputValues = mergeInputs(inputs, self.tools.get(name).constants);
+        Tool tool = self.tools.get(name);
+        map<json>|error inputValues = mergeInputs(inputs, tool.constants);
         if inputValues is error {
-            log:printDebug("Tool input validation failed",
-                inputValues,
-                toolName = name
-            );
+            logToolInputValidationFailed(inputValues, name);
             string instruction = string `Tool "${name}"  execution failed due to invalid inputs provided.` +
-                string ` Use the schema to provide inputs: ${self.tools.get(name).variables.toString()}`;
+                string ` Use the schema to provide inputs: ${tool.variables.toString()}`;
             return error ToolInvalidInputError("Tool is provided with invalid inputs.", inputValues, toolName = name,
                 inputs = inputs ?: (), instruction = instruction);
         }
 
-        log:printDebug("Executing tool",
-            toolName = name,
-            isMcpTool = self.isMcpTool(name),
-            arguments = inputValues
-        );
-        isolated function caller = self.tools.get(name).caller;
+        logToolExecuting(name, self.isMcpTool(name), inputValues);
         ToolExecutionResult|error execution;
         lock {
             readonly & map<json> toolInput = self.isMcpTool(name)
                 ? {params: {name, arguments: inputValues}}.cloneReadOnly()
                 : inputValues.cloneReadOnly();
-            execution = trap executeTool(caller, toolInput, context);
+            execution = trap executeTool(tool.caller, toolInput, context);
         }
         if execution is error {
-            log:printDebug("Tool execution failed",
-                execution,
-                toolName = name
-            );
+            logToolFailed(execution, name);
             return error ToolExecutionError("Tool execution failed.", execution, toolName = name,
                 inputs = inputValues.length() == 0 ? {} : inputValues);
         }
-        any|error observation = execution.result;
-        if observation is http:Response {
-            observation = observation.getStatusCodeRecord();
-        }
-        if observation is stream<anydata, error?> {
-            anydata[]|error result = from anydata item in observation
-                select item;
-            observation = result;
-        }
-        if observation is anydata {
-            log:printDebug("Tool executed successfully",
-                toolName = name,
-                output = observation.toString()
-            );
-            return {value: observation};
-        }
-        if observation !is error {
-            log:printDebug("Tool returns an invalid output. Expected anydata or error.",
-                outputType = (typeof observation).toString(),
-                toolName = name,
-                inputs = inputValues.length() == 0 ? {} : inputValues
-            );
-            return error ToolInvalidOutputError("Tool returns an invalid output. Expected anydata or error.",
-                outputType = typeof observation, toolName = name, inputs = inputValues.length() == 0 ? {} : inputValues);
-        }
-        if observation.message() == "{ballerina/lang.function}IncompatibleArguments" {
-            string instruction = string `Tool "${name}"  execution failed due to invalid inputs provided.`
-                + string ` Use the schema to provide inputs: ${self.tools.get(name).variables.toString()}`;
-            log:printDebug(instruction,
-                toolName = name,
-                inputs = inputValues.length() == 0 ? {} : inputValues
-            );
-            return error ToolInvalidInputError("Tool is provided with invalid inputs.",
-                observation, toolName = name, inputs = inputValues.length() == 0 ? {} : inputValues,
-                instruction = instruction);
-        }
-        return {value: observation};
+        return convertToolOutput(execution.result, name, inputValues, tool.variables);
     }
 
     isolated function getToolDescription(string toolName) returns string? {
@@ -210,159 +147,3 @@ public isolated class ToolRegistry {
     }
 }
 
-isolated function getToolConfig(FunctionTool tool) returns ToolConfig|Error {
-    typedesc<FunctionTool> typedescriptor = typeof tool;
-    ToolAnnotationConfig? config = typedescriptor.@AgentTool;
-    if config is () {
-        return error Error("The function '" + getFunctionName(tool) + "' must be annotated with `@ai:AgentTool`.");
-    }
-    do {
-        return {
-            name: check config?.name.ensureType(),
-            description: check config?.description.ensureType(),
-            parameters: check config?.parameters.ensureType(),
-            caller: tool
-        };
-    } on fail error e {
-        return error Error("Unable to register the function '" + getFunctionName(tool) + "' as agent tool", e);
-    }
-}
-
-# Executes an AgentTool.
-#
-# + tool - Function pointer to the AgentTool
-# + llmToolInput - Tool input generated by the LLM
-# + context - Additional context for the tool execution
-# + return - Result of the tool execution
-public isolated function executeTool(FunctionTool tool, map<json> llmToolInput, Context context = new)
-    returns ToolExecutionResult {
-    (anydata|Context)[]|error inputArgs = getInputArgumentsOfTool(tool, llmToolInput, context);
-    if inputArgs is error {
-        return {result: inputArgs};
-    }
-    any|error result = function:call(tool, ...inputArgs);
-    return {result};
-}
-
-isolated function getInputArgumentsOfTool(FunctionTool tool, map<json> inputValues, Context context = new)
-    returns (anydata|Context)[]|error {
-    map<anydata> inputArgs = {};
-    boolean hasContextArg = false;
-    map<typedesc<anydata|Context>> typedescs = getToolParameterTypes(tool);
-    foreach [string, typedesc<anydata|Context>] [parameterName, typedescriptor] in typedescs.entries() {
-        if (inputValues.hasKey(parameterName) && typedescriptor is typedesc<anydata> && !isContextType(typedescriptor)) {
-            anydata inputArg = check inputValues.get(parameterName).cloneWithType(typedescriptor);
-            inputArgs[parameterName] = inputArg;
-        } else if isContextType(typedescriptor) {
-            hasContextArg = true;
-        }
-    }
-
-    map<anydata> argsWithDefaultValues = (check trap getArgsWithDefaultsExcludingContext(tool, inputArgs));
-    anydata[] orderedArgs = argsWithDefaultValues.toArray();
-    if (!hasContextArg) {
-        return orderedArgs.cloneReadOnly();
-    }
-    // Compiler plugin guarantees context is the first argument, if present
-    return [context, ...orderedArgs.cloneReadOnly()];
-}
-
-isolated function registerTool(map<Tool & readonly> toolMap, ToolConfig[] tools) returns Error? {
-    foreach ToolConfig tool in tools {
-        string name = tool.name;
-        if name.toLowerAscii().matches(FINAL_ANSWER_REGEX) {
-            return error Error(string ` Tool name '${name}' is reserved for the 'Final answer'.`);
-        }
-        if !name.matches(re `^[a-zA-Z0-9_-]{1,64}$`) {
-            log:printWarn(string `Tool name '${name}' contains invalid characters. Only alphanumeric, underscore and hyphen are allowed.`);
-            if name.length() > 64 {
-                name = name.substring(0, 64);
-            }
-            name = regexp:replaceAll(re `[^a-zA-Z0-9_-]`, name, "_");
-        }
-        if toolMap.hasKey(name) {
-            log:printDebug("Duplicate tool name detected",
-                toolName = name
-            );
-            return error Error("Duplicated tools. Tool name should be unique.", toolName = name);
-        }
-
-        map<json>|error? variables = tool.parameters.cloneWithType();
-        if variables is error {
-            return error Error("Unable to register tool", variables);
-        }
-        map<json> constants = {};
-
-        if variables is map<json> {
-            constants = resolveSchema(variables) ?: {};
-        }
-
-        Tool agentTool = {
-            name,
-            description: regexp:replaceAll(re `\n`, tool.description, " "),
-            variables,
-            constants,
-            caller: tool.caller
-        };
-        toolMap[name] = agentTool.cloneReadOnly();
-    }
-}
-
-isolated function resolveSchema(map<json> schema) returns map<json>? {
-    // TODO fix when all values are removed as constant, to use null schema
-    if schema is ObjectInputSchema {
-        map<JsonSubSchema>? properties = schema.properties;
-        if properties is () {
-            return;
-        }
-        map<json> values = {};
-        foreach [string, JsonSubSchema] [key, subSchema] in properties.entries() {
-            json returnedValue = ();
-            if subSchema is ArrayInputSchema {
-                returnedValue = subSchema?.default;
-            }
-            else if subSchema is PrimitiveInputSchema {
-                returnedValue = subSchema?.default;
-            }
-            else if subSchema is ConstantValueSchema {
-                string tempKey = key; // TODO temporary reference to fix java null pointer issue
-                returnedValue = subSchema.'const;
-                _ = properties.remove(tempKey);
-                string[]? required = schema.required;
-                if required !is () {
-                    schema.required = from string requiredKey in required
-                        where requiredKey != tempKey
-                        select requiredKey;
-                }
-            } else {
-                returnedValue = resolveSchema(subSchema);
-            }
-            if returnedValue !is () {
-                values[key] = returnedValue;
-            }
-        }
-        if values.length() > 0 {
-            return values;
-        }
-        return ();
-    }
-    // skip anyof, oneof, allof, not
-    return ();
-}
-
-isolated function mergeInputs(map<json>? inputs, map<json> constants) returns map<json> {
-    if inputs is () {
-        return constants;
-    }
-    foreach [string, json] [key, value] in constants.entries() {
-        if inputs.hasKey(key) {
-            json inputValue = inputs[key];
-            if inputValue is map<json> && value is map<json> {
-                inputs[key] = mergeInputs(inputValue, value);
-            }
-        } else {
-            inputs[key] = value;
-        }
-    }
-    return inputs;
-}

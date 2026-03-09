@@ -15,7 +15,6 @@
 // under the License.
 
 import ballerina/http;
-import ballerina/log;
 import ballerina/mcp;
 
 # Supported HTTP methods.
@@ -136,45 +135,29 @@ public isolated class McpToolKit {
     public isolated function init(string serverUrl, string[]? permittedTools = (),
             mcp:Implementation info = {name: "MCP Client", version: "1.0.0"},
             *mcp:StreamableHttpClientTransportConfig config) returns Error? {
-        log:printDebug("Connecting to MCP server",
-            serverUrl = serverUrl,
-            clientInfo = info
-        );
+        logMcpServerConnecting(serverUrl, info);
 
         mcp:StreamableHttpClient|mcp:ClientError mcpClient = new (serverUrl, config);
         if mcpClient is error {
-            log:printDebug("Failed to connect to MCP server",
-                mcpClient,
-                serverUrl = serverUrl
-            );
+            logMcpServerConnectionFailed(mcpClient, serverUrl);
             return error Error("Failed to initialize the MCP client", mcpClient);
         }
         self.mcpClient = mcpClient;
 
         mcp:ClientError? initializeRes = self.mcpClient->initialize(info);
         if initializeRes is error {
-            log:printDebug("Failed to initialize MCP client",
-                initializeRes,
-                serverUrl = serverUrl
-            );
+            logMcpClientInitFailed(initializeRes, serverUrl);
             return error Error("Failed to initialize the MCP client", initializeRes);
         }
 
         mcp:ListToolsResult|error listTools = self.mcpClient->listTools();
         if listTools is error {
-            log:printDebug("Failed to retrieve tools from MCP server",
-                listTools,
-                serverUrl = serverUrl
-            );
+            logMcpToolsRetrievalFailed(listTools, serverUrl);
             return error Error("Failed to get tools from the MCP server", listTools);
         }
         mcp:ToolDefinition[] filteredTools = filterPermittedTools(listTools.tools, permittedTools);
 
-        log:printDebug("Retrieved tools from MCP server",
-            serverUrl = serverUrl,
-            tools = listTools.tools,
-            filteredTools = filteredTools
-        );
+        logMcpToolsRetrieved(serverUrl, listTools.tools, filteredTools);
 
         isolated function caller = self.callTool;
 
@@ -296,192 +279,69 @@ public isolated class HttpServiceToolKit {
     # + return - An array of Tools corresponding to the HttpTools
     public isolated function getTools() returns ToolConfig[] => self.tools;
 
-    private isolated function get(HttpInput httpInput) returns HttpOutput|Error {
+    private isolated function get(HttpInput httpInput) returns HttpOutput|Error
+        => self.executeHttpRequest(GET, httpInput, false);
+
+    private isolated function post(HttpInput httpInput) returns HttpOutput|Error
+        => self.executeHttpRequest(POST, httpInput, true);
+
+    private isolated function delete(HttpInput httpInput) returns HttpOutput|Error
+        => self.executeHttpRequest(DELETE, httpInput, true);
+
+    private isolated function put(HttpInput httpInput) returns HttpOutput|Error
+        => self.executeHttpRequest(PUT, httpInput, true);
+
+    private isolated function patch(HttpInput httpInput) returns HttpOutput|Error
+        => self.executeHttpRequest(PATCH, httpInput, true);
+
+    private isolated function head(HttpInput httpInput) returns HttpOutput|Error
+        => self.executeHttpRequest(HEAD, httpInput, false);
+
+    private isolated function options(HttpInput httpInput) returns HttpOutput|Error
+        => self.executeHttpRequest(OPTIONS, httpInput, false);
+
+    private isolated function executeHttpRequest(HttpMethod method, HttpInput httpInput,
+            boolean hasBody) returns HttpOutput|Error {
         do {
-            HttpParameters httpParameters = check getHttpParameters(self.httpTools, GET, httpInput, false);
-            log:printDebug("Executing HTTP GET request",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "GET"
-            );
-            http:Response getResult = check self.httpClient->get(httpParameters.path, headers = self.headers);
-            log:printDebug("HTTP request completed",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "GET",
-                statusCode = getResult.statusCode
-            );
-            return extractResponsePayload(httpParameters.path, getResult);
+            HttpParameters httpParameters = check getHttpParameters(self.httpTools, method, httpInput, hasBody);
+            string path = httpParameters.path;
+            logHttpRequestStarted(self.serviceUrl, path, method);
+            http:Response response = check self.dispatchHttpRequest(method, path, httpParameters.message);
+            logHttpRequestCompleted(self.serviceUrl, path, method, response.statusCode);
+            return extractResponsePayload(path, response);
         } on fail error e {
-            log:printDebug("HTTP request failed",
-                serverUrl = self.serviceUrl,
-                path = httpInput.path,
-                method = "GET",
-                errorMessage = e.message()
-            );
+            logHttpRequestFailed(self.serviceUrl, httpInput.path, method, e.message());
             return handleHttpResourceDespatchError(e);
         }
     }
 
-    private isolated function post(HttpInput httpInput) returns HttpOutput|Error {
-        do {
-            HttpParameters httpParameters = check getHttpParameters(self.httpTools, POST, httpInput, true);
-            log:printDebug("Executing HTTP POST request",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "POST"
-            );
-            http:Response postResult = check self.httpClient->post(httpParameters.path, message = httpParameters.message, headers = self.headers);
-            log:printDebug("HTTP request completed",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "POST",
-                statusCode = postResult.statusCode
-            );
-            return extractResponsePayload(httpParameters.path, postResult);
-        } on fail error e {
-            log:printDebug("HTTP request failed",
-                serverUrl = self.serviceUrl,
-                path = httpInput.path,
-                method = "POST",
-                errorMessage = e.message()
-            );
-            return handleHttpResourceDespatchError(e);
-        }
-    }
-
-    private isolated function delete(HttpInput httpInput) returns HttpOutput|Error {
-        do {
-            HttpParameters httpParameters = check getHttpParameters(self.httpTools, DELETE, httpInput, true);
-            log:printDebug("Executing HTTP DELETE request",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "DELETE"
-            );
-            http:Response deleteResult = check self.httpClient->delete(httpParameters.path, message = httpParameters.message, headers = self.headers);
-            log:printDebug("HTTP request completed",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "DELETE",
-                statusCode = deleteResult.statusCode
-            );
-            return extractResponsePayload(httpParameters.path, deleteResult);
-        } on fail error e {
-            log:printDebug("HTTP request failed",
-                serverUrl = self.serviceUrl,
-                path = httpInput.path,
-                method = "DELETE",
-                errorMessage = e.message()
-            );
-            return handleHttpResourceDespatchError(e);
-        }
-    }
-
-    private isolated function put(HttpInput httpInput) returns HttpOutput|Error {
-        do {
-            HttpParameters httpParameters = check getHttpParameters(self.httpTools, PUT, httpInput, true);
-            log:printDebug("Executing HTTP PUT request",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "PUT"
-            );
-            http:Response putResult = check self.httpClient->put(httpParameters.path, message = httpParameters.message, headers = self.headers);
-            log:printDebug("HTTP request completed",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "PUT",
-                statusCode = putResult.statusCode
-            );
-            return extractResponsePayload(httpParameters.path, putResult);
-        } on fail error e {
-            log:printDebug("HTTP request failed",
-                serverUrl = self.serviceUrl,
-                path = httpInput.path,
-                method = "PUT",
-                errorMessage = e.message()
-            );
-            return handleHttpResourceDespatchError(e);
-        }
-    }
-
-    private isolated function patch(HttpInput httpInput) returns HttpOutput|Error {
-        do {
-            HttpParameters httpParameters = check getHttpParameters(self.httpTools, PATCH, httpInput, true);
-            log:printDebug("Executing HTTP PATCH request",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "PATCH"
-            );
-            http:Response patchResult = check self.httpClient->patch(httpParameters.path, message = httpParameters.message, headers = self.headers);
-            log:printDebug("HTTP request completed",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "PATCH",
-                statusCode = patchResult.statusCode
-            );
-            return extractResponsePayload(httpParameters.path, patchResult);
-        } on fail error e {
-            log:printDebug("HTTP request failed",
-                serverUrl = self.serviceUrl,
-                path = httpInput.path,
-                method = "PATCH",
-                errorMessage = e.message()
-            );
-            return handleHttpResourceDespatchError(e);
-        }
-    }
-
-    private isolated function head(HttpInput httpInput) returns HttpOutput|Error {
-        do {
-            HttpParameters httpParameters = check getHttpParameters(self.httpTools, HEAD, httpInput, false);
-            log:printDebug("Executing HTTP HEAD request",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "HEAD"
-            );
-            http:Response headResult = check self.httpClient->head(httpParameters.path, headers = self.headers);
-            log:printDebug("HTTP request completed",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "HEAD",
-                statusCode = headResult.statusCode
-            );
-            return extractResponsePayload(httpParameters.path, headResult);
-        } on fail error e {
-            log:printDebug("HTTP request failed",
-                serverUrl = self.serviceUrl,
-                path = httpInput.path,
-                method = "HEAD",
-                errorMessage = e.message()
-            );
-            return handleHttpResourceDespatchError(e);
-        }
-    }
-
-    private isolated function options(HttpInput httpInput) returns HttpOutput|Error {
-        do {
-            HttpParameters httpParameters = check getHttpParameters(self.httpTools, OPTIONS, httpInput, false);
-            log:printDebug("Executing HTTP OPTIONS request",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "OPTIONS"
-            );
-            http:Response optionsResult = check self.httpClient->options(httpParameters.path, headers = self.headers);
-            log:printDebug("HTTP request completed",
-                serverUrl = self.serviceUrl,
-                path = httpParameters.path,
-                method = "OPTIONS",
-                statusCode = optionsResult.statusCode
-            );
-            return extractResponsePayload(httpParameters.path, optionsResult);
-        } on fail error e {
-            log:printDebug("HTTP request failed",
-                serverUrl = self.serviceUrl,
-                path = httpInput.path,
-                method = "OPTIONS",
-                errorMessage = e.message()
-            );
-            return handleHttpResourceDespatchError(e);
+    private isolated function dispatchHttpRequest(HttpMethod method, string path,
+            json|xml message) returns http:Response|http:ClientError {
+        match method {
+            GET => {
+                return self.httpClient->get(path, headers = self.headers);
+            }
+            POST => {
+                return self.httpClient->post(path, message, headers = self.headers);
+            }
+            DELETE => {
+                return self.httpClient->delete(path, message, headers = self.headers);
+            }
+            PUT => {
+                return self.httpClient->put(path, message, headers = self.headers);
+            }
+            PATCH => {
+                return self.httpClient->patch(path, message, headers = self.headers);
+            }
+            HEAD => {
+                return self.httpClient->head(path, headers = self.headers);
+            }
+            OPTIONS => {
+                return self.httpClient->options(path, headers = self.headers);
+            }
+            _ => {
+                return error http:ClientError("invalid http type: " + method);
+            }
         }
     }
 }
