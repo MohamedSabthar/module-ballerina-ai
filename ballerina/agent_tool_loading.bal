@@ -96,3 +96,30 @@ isolated function getToolCalls(ChatAssistantMessage msg) returns FunctionCall[]?
     }
     return toolCalls;
 }
+
+# Returns the filtered set of tools based on the tool loading strategy.
+#
+# + toolStore - The tool store containing registered tools
+# + strategy - The tool loading strategy to apply
+# + messages - The current conversation messages
+# + model - The model provider for LLM-based filtering
+# + return - The filtered set of tool schemas
+isolated function getFilteredTools(ToolStore toolStore, ToolLoadingStrategy strategy,
+        ChatMessage[] messages, ModelProvider model) returns ChatCompletionFunctions[] {
+    ChatCompletionFunctions[] registeredTools = from Tool tool in toolStore.tools.toArray()
+        select {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.variables
+        };
+    if strategy == LLM_FILTER {
+        ChatMessage lastMessage = messages[messages.length() - 1];
+        if lastMessage is ChatUserMessage {
+            ChatCompletionFunctions[]? selectedTools = lazyLoadTools(cloneMessages(messages), registeredTools, model);
+            if selectedTools !is () {
+                return selectedTools;
+            }
+        }
+    }
+    return registeredTools;
+}
