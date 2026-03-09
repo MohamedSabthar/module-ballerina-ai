@@ -44,7 +44,7 @@ type ToolInfo record {|
     string description;
 |};
 
-public isolated class ToolStore {
+public isolated class ToolRegistry {
     public final map<Tool> & readonly tools;
     private map<()> mcpTools = {};
 

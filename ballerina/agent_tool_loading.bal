@@ -104,7 +104,7 @@ isolated function getToolCalls(ChatAssistantMessage msg) returns FunctionCall[]?
 # + messages - The current conversation messages
 # + model - The model provider for LLM-based filtering
 # + return - The filtered set of tool schemas
-isolated function getFilteredTools(ToolStore toolStore, ToolLoadingStrategy strategy,
+isolated function getFilteredTools(ToolRegistry toolStore, ToolLoadingStrategy strategy,
         ChatMessage[] messages, ModelProvider model) returns ChatCompletionFunctions[] {
     ChatCompletionFunctions[] registeredTools = from Tool tool in toolStore.tools.toArray()
         select {

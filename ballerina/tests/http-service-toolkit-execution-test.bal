@@ -167,7 +167,7 @@ isolated function httpSvcToolKitExecutionDataProvider() returns [string, map<jso
 function testHttpSvcToolKitExecution(string toolName, map<json> httpInput, int expectedCode, boolean expectBody)
         returns error? {
     HttpServiceToolKit toolkit = check new (MOCK_HTTP_SVC_URL, httpSvcTools);
-    ToolStore store = check new (toolkit);
+    ToolRegistry store = check new (toolkit);
     ToolOutput output = check store.execute({
         name: toolName,
         arguments: {httpInput: httpInput}
@@ -192,7 +192,7 @@ function testHttpSvcToolKitWithCustomHeaders() returns error? {
         "X-Request-Id": "12345"
     };
     HttpServiceToolKit toolkit = check new (MOCK_HTTP_SVC_URL, [httpSvcTools[0]], headers = customHeaders);
-    ToolStore store = check new (toolkit);
+    ToolRegistry store = check new (toolkit);
     ToolOutput output = check store.execute({
         name: "svcGet",
         arguments: {
@@ -219,7 +219,7 @@ function testHttpSvcToolKitNotFoundResponse() returns error? {
         path: "/nonexistent"
     };
     HttpServiceToolKit toolkit = check new (MOCK_HTTP_SVC_URL, [notFoundTool]);
-    ToolStore store = check new (toolkit);
+    ToolRegistry store = check new (toolkit);
     ToolOutput output = check store.execute({
         name: "svcNotFound",
         arguments: {

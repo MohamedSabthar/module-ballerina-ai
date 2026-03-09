@@ -20,9 +20,9 @@ import ballerina/uuid;
 
 # Handles single and parallel tool execution, error classification, and span management.
 isolated class ToolExecutionHandler {
-    private final ToolStore toolStore;
+    private final ToolRegistry toolStore;
 
-    isolated function init(ToolStore toolStore) {
+    isolated function init(ToolRegistry toolStore) {
         self.toolStore = toolStore;
     }
 

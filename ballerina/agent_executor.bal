@@ -129,7 +129,7 @@ isolated function getObservationString(anydata|error observation) returns string
     }
 }
 
-isolated function setupToolSpan(string toolName, ToolStore toolStore, FunctionCall toolCall) returns observe:ExecuteToolSpan {
+isolated function setupToolSpan(string toolName, ToolRegistry toolStore, FunctionCall toolCall) returns observe:ExecuteToolSpan {
     observe:ExecuteToolSpan span = observe:createExecuteToolSpan(toolName);
     string? toolCallId = toolCall.id;
     if toolCallId is string {

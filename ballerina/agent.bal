@@ -34,19 +34,20 @@ public isolated distinct class Agent {
     private final readonly & ToolSchema[] toolSchemas;
     private final AgentExecutor executor;
     private final ConversationManager conversationManager;
-    final ToolStore toolStore;
+    final ToolRegistry toolStore;
 
     # Initialize an Agent.
     #
     # + config - Configuration used to initialize an agent
     public isolated function init(@display {label: "Agent Configuration"} *AgentConfiguration config) returns Error? {
+        string instructions = getFormattedSystemPrompt(config.systemPrompt);
         observe:CreateAgentSpan span = observe:createCreateAgentSpan(config.systemPrompt.role);
         span.addId(self.agentId);
-        span.addSystemInstructions(getFormattedSystemPrompt(config.systemPrompt));
+        span.addSystemInstructions(instructions);
 
         INFER_TOOL_COUNT|int maxIter = config.maxIter;
         int resolvedMaxIter = maxIter is INFER_TOOL_COUNT ? config.tools.length() + 1 : maxIter;
-        self.instructions = getFormattedSystemPrompt(config.systemPrompt);
+        self.instructions = instructions;
         self.role = config.systemPrompt.role;
         Memory? memory = config.hasKey("memory") ? config?.memory : check new ShortTermMemory();
         do {
