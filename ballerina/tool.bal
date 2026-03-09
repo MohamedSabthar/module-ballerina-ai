@@ -44,8 +44,6 @@ type ToolInfo record {|
     string description;
 |};
 
-@deprecated
-// TODO: d
 public isolated class ToolStore {
     public final map<Tool> & readonly tools;
     private map<()> mcpTools = {};

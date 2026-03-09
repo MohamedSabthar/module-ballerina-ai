@@ -92,7 +92,7 @@ isolated class AgentExecutor {
         return {steps, iterations, answer: content, toolCalls, executionSteps: progress.executionSteps};
     }
 
-    # Executes a single iteration of the agent loop: reason then act.
+    // Executes a single iteration of the agent loop: reason then act.
     private isolated function executeIteration(ExecutionProgress progress, string sessionId,
             Context context, string executionId) returns IterationResult {
         logLlmReasoningStarted(executionId, sessionId, progress.executionSteps.toString());
