@@ -111,7 +111,6 @@ public isolated distinct class Agent {
 
         ExecutionTrace executionTrace = self.runExecutor(query, sessionId, context, executionId);
         ChatUserMessage userMessage = {role: USER, content: query};
-        Iteration[] iterations = executionTrace.iterations;
         FunctionCall[]? toolCalls = executionTrace.toolCalls.length() == 0 ? () : executionTrace.toolCalls;
         do {
             string answer = check getAnswer(executionTrace, self.maxIter);
@@ -122,19 +121,8 @@ public isolated distinct class Agent {
             );
             span.addOutput(observe:TEXT, answer);
             span.close();
-
-            return withTrace
-                ? {
-                    id: executionId,
-                    userMessage,
-                    iterations,
-                    tools: self.toolSchemas,
-                    startTime,
-                    endTime: time:utcNow(),
-                    output: {role: ASSISTANT, content: answer},
-                    toolCalls
-                }
-                : answer;
+            return withTrace ? buildTrace(executionId, userMessage, executionTrace.iterations,
+                        self.toolSchemas, startTime, answer, toolCalls) : answer;
         } on fail Error err {
             log:printDebug("Agent execution failed",
                     err,
@@ -143,16 +131,8 @@ public isolated distinct class Agent {
             );
             span.close(err);
             return withTrace
-                ? {
-                    id: executionId,
-                    userMessage,
-                    iterations,
-                    tools: self.toolSchemas,
-                    startTime,
-                    endTime: time:utcNow(),
-                    output: err,
-                    toolCalls
-                }
+                ? buildTrace(executionId, userMessage, executionTrace.iterations, self.toolSchemas,
+                        startTime, err, toolCalls)
                 : err;
         }
     }
@@ -230,32 +210,9 @@ public isolated distinct class Agent {
 
         (ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error)[] steps = [];
         string? content = ();
-        // Retrieve the conversation history from memory, update the system message at the start,
-        // and append the user message for the current interaction.
-        // After iterating and collecting execution steps in temporary memory,
-        // update the actual memory in a single batch, including the system prompt and user message for this interaction.
-        ChatMessage[]|MemoryError prevHistory = self.memory.get(sessionId);
-        if prevHistory is MemoryError {
-            log:printDebug("Failed to retrieve conversation history from memory",
-                    prevHistory,
-                    executionId = executionId,
-                    sessionId = sessionId
-            );
-        }
-        ChatMessage[] history = (prevHistory is ChatMessage[]) ? [...prevHistory] : [];
-        ChatSystemMessage systemMessage = {role: SYSTEM, content: self.systemPrompt};
-        if history.length() > 0 {
-            ChatMessage firstMessage = history[0];
-            if firstMessage is ChatSystemMessage && self.systemPrompt != toString(firstMessage.content) {
-                history[0] = systemMessage;
-            }
-        } else {
-            history.unshift(systemMessage);
-        }
-        ChatUserMessage userMessage = {role: USER, content: query};
-        history.push(userMessage);
+        var [history, systemMessage, userMessage] = initializeConversationHistory(
+                self.memory, sessionId, self.systemPrompt, query, executionId);
         ExecutionProgress progress = {instruction: self.systemPrompt, query, context, executionId, history};
-        ChatMessage[] temporaryMemory = [systemMessage, userMessage];
         ChatAssistantMessage? finalAssistantMessage = ();
         int iter = 0;
         while iter < self.maxIter {
@@ -288,6 +245,7 @@ public isolated distinct class Agent {
             if self.verbose {
                 verbosePrint(step, iter);
             }
+            iterations.push({startTime, endTime: time:utcNow(), history: iterationHistory, output: iterationOutput});
             if step is Error {
                 error? cause = step.cause();
                 log:printDebug("Error occurred during agent iteration",
@@ -297,7 +255,6 @@ public isolated distinct class Agent {
                         sessionId = sessionId,
                         cause = cause !is () ? cause.toString() : "none");
                 steps.push(step);
-                iterations.push({startTime, endTime: time:utcNow(), history: iterationHistory, output: iterationOutput});
                 break;
             }
             if step is string {
@@ -309,9 +266,9 @@ public isolated distinct class Agent {
                         sessionId = sessionId
                     );
                 finalAssistantMessage = {role: ASSISTANT, content: step};
-                iterations.push({startTime, endTime: time:utcNow(), history: iterationHistory, output: iterationOutput});
                 break;
             }
+            steps.push(step);
             iter += 1;
             log:printDebug("Agent iteration started",
                     executionId = executionId,
@@ -320,26 +277,11 @@ public isolated distinct class Agent {
                     stepsCompleted = steps.length(),
                     sessionId = sessionId
             );
-
-            steps.push(step);
-            iterations.push({startTime, endTime: time:utcNow(), history: iterationHistory, output: iterationOutput});
-
             startTime = time:utcNow();
         }
 
-        ChatMessage[] intermediateFunctionCallMessages = createFunctionCallMessages(progress);
-        temporaryMemory.push(...intermediateFunctionCallMessages);
-        if finalAssistantMessage is ChatAssistantMessage {
-            temporaryMemory.push(finalAssistantMessage);
-        }
-
-        // Batch update the memory with the user message, system message, and all intermediate steps from tool execution
-        updateMemory(self.memory, sessionId, temporaryMemory);
-        if self.stateless {
-            MemoryError? err = self.memory.delete(sessionId);
-            // Ignore this error since the stateless agent always relies on DefaultMessageWindowChatMemoryManager,
-            // which never returns an error.
-        }
+        finalizeConversationMemory(self.memory, sessionId, self.stateless, progress,
+                systemMessage, userMessage, finalAssistantMessage);
         // Collect all the tool call actions
         FunctionCall[] toolCalls = from ExecutionStep step in progress.executionSteps
             let var llmResponse = step.llmResponse
@@ -385,27 +327,16 @@ public isolated distinct class Agent {
     }
 
     isolated function getExecutionResult(FunctionCall toolCall, string executionId, string sessionId, Context ctx) returns ExecutionResult|ExecutionError {
-        ExecutionResult|ExecutionError executionResult;
         string toolName = toolCall.name;
         log:printDebug("Parsed LLM response as tool call",
                 executionId = executionId,
                 sessionId = sessionId,
                 toolName = toolName,
                 arguments = toolCall.arguments
-                        );
-        observe:ExecuteToolSpan span = observe:createExecuteToolSpan(toolName);
-        string? toolCallId = toolCall.id;
-        if toolCallId is string {
-            span.addId(toolCallId);
-        }
-        string? toolDescription = self.toolStore.getToolDescription(toolName);
-        if toolDescription is string {
-            span.addDescription(toolDescription);
+        );
+        observe:ExecuteToolSpan span = setupToolSpan(toolName, self.toolStore, toolCall);
 
-        }
-        span.addType(self.toolStore.isMcpTool(toolName) ? observe:EXTENTION : observe:FUNCTION);
-        span.addArguments(toolCall.arguments);
-
+        ExecutionResult|ExecutionError executionResult;
         ToolOutput|ToolExecutionError|LlmInvalidGenerationError output = self.toolStore.execute(toolCall, ctx);
         if output is Error {
             string errorMessage;
@@ -422,33 +353,26 @@ public isolated distinct class Agent {
                 'error: output,
                 observation: errorObservation
             };
-
             log:printDebug("Tool execution resulted in error",
                     executionId = executionId,
                     observation = errorObservation,
                     sessionId = sessionId,
                     toolName = toolName
-                            );
-
-            Error toolExecutionError = error(errorObservation, details = {toolCall});
-            span.close(toolExecutionError);
+            );
         } else {
             anydata|error value = output.value;
-            anydata observation = value is error ? value.toString() : value;
             log:printDebug("Tool execution successful",
                     executionId = executionId,
                     sessionId = sessionId,
                     toolName = toolName,
-                    output = observation
-                            );
+                    output = value is error ? value.toString() : value
+            );
             executionResult = {
                 tool: toolCall,
                 observation: value
             };
-
-            span.addOutput(observation);
-            span.close();
         }
+        closeToolSpan(span, executionResult);
         return executionResult;
     }
 }

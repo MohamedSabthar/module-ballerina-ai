@@ -14,7 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import ai.observe;
+
 import ballerina/log;
+import ballerina/time;
 
 # Execution progress record
 type ExecutionProgress record {|
@@ -39,6 +42,21 @@ type ExecutionStep record {|
     # Observations produced by the tool during the execution
     anydata|error observation;
 |};
+
+isolated function buildTrace(string executionId, ChatUserMessage userMessage, Iteration[] iterations,
+        readonly & ToolSchema[] tools, time:Utc startTime,
+        string|Error output, FunctionCall[]? toolCalls) returns Trace {
+    return {
+        id: executionId,
+        userMessage,
+        iterations,
+        tools,
+        startTime,
+        endTime: time:utcNow(),
+        output: output is Error ? output : {role: ASSISTANT, content: output},
+        toolCalls
+    };
+}
 
 isolated function getAnswer(ExecutionTrace executionTrace, int maxIter) returns string|Error {
     string? answer = executionTrace.answer;
@@ -136,10 +154,76 @@ isolated function getObservationString(anydata|error observation) returns string
     }
 }
 
-isolated function updateMemory(Memory memory, string sessionId, ChatMessage[] messages) {
-    error? updateResult = memory.update(sessionId, messages);
-    if updateResult is error {
+isolated function initializeConversationHistory(Memory memory, string sessionId, string systemPrompt, string query,
+        string executionId) returns [ChatMessage[], ChatSystemMessage, ChatUserMessage] {
+    ChatMessage[]|MemoryError prevHistory = memory.get(sessionId);
+    if prevHistory is MemoryError {
+        log:printDebug("Failed to retrieve conversation history from memory",
+                prevHistory,
+                executionId = executionId,
+                sessionId = sessionId
+        );
+    }
+    ChatMessage[] history = (prevHistory is ChatMessage[]) ? [...prevHistory] : [];
+    ChatSystemMessage systemMessage = {role: SYSTEM, content: systemPrompt};
+    if history.length() > 0 {
+        ChatMessage firstMessage = history[0];
+        if firstMessage is ChatSystemMessage && systemPrompt != toString(firstMessage.content) {
+            history[0] = systemMessage;
+        }
+    } else {
+        history.unshift(systemMessage);
+    }
+    ChatUserMessage userMessage = {role: USER, content: query};
+    history.push(userMessage);
+    return [history, systemMessage, userMessage];
+}
+
+isolated function finalizeConversationMemory(Memory memory, string sessionId, boolean stateless,
+        ExecutionProgress progress, ChatSystemMessage systemMessage, ChatUserMessage userMessage,
+        ChatAssistantMessage? finalAssistantMessage) {
+    ChatMessage[] temporaryMemory = [systemMessage, userMessage];
+    ChatMessage[] intermediateFunctionCallMessages = createFunctionCallMessages(progress);
+    temporaryMemory.push(...intermediateFunctionCallMessages);
+    if finalAssistantMessage is ChatAssistantMessage {
+        temporaryMemory.push(finalAssistantMessage);
+    }
+    MemoryError? updateResult = memory.update(sessionId, temporaryMemory);
+    if updateResult is MemoryError {
         log:printError("Error occurred while updating the memory", updateResult);
+    }
+    if stateless {
+        MemoryError? deleteResult = memory.delete(sessionId);
+        if deleteResult is MemoryError {
+            log:printError("Error occurred while deleting stateless memory", deleteResult);
+        }
+    }
+}
+
+isolated function setupToolSpan(string toolName, ToolStore toolStore, FunctionCall toolCall) returns observe:ExecuteToolSpan {
+    observe:ExecuteToolSpan span = observe:createExecuteToolSpan(toolName);
+    string? toolCallId = toolCall.id;
+    if toolCallId is string {
+        span.addId(toolCallId);
+    }
+    string? toolDescription = toolStore.getToolDescription(toolName);
+    if toolDescription is string {
+        span.addDescription(toolDescription);
+    }
+    span.addType(toolStore.isMcpTool(toolName) ? observe:EXTENTION : observe:FUNCTION);
+    span.addArguments(toolCall.arguments);
+    return span;
+}
+
+isolated function closeToolSpan(observe:ExecuteToolSpan span, ExecutionResult|ExecutionError result) {
+    if result is ExecutionError {
+        Error toolExecutionError = error(result.observation, details = {llmResponse: result.llmResponse});
+        span.close(toolExecutionError);
+    } else {
+        anydata|error value = result.observation;
+        anydata observation = value is error ? value.toString() : value;
+        span.addOutput(observation);
+        span.close();
     }
 }
 

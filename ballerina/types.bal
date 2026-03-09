@@ -203,15 +203,9 @@ public type ExecutionError record {|
     string observation;
 |};
 
-# Tool selected by LLM to be performed by the agent
-public type LlmToolResponse record {|
-    # Name of the tool to selected
-    string name;
-    # Input to the tool
-    map<json>? arguments = {};
-    # Identifier for the tool call
-    string id?;
-|};
+# Tool selected by LLM to be performed by the agent.
+# This is a type alias for `FunctionCall` as they represent the same concept.
+public type LlmToolResponse FunctionCall;
 
 # Output from executing an action
 public type ToolOutput record {|
