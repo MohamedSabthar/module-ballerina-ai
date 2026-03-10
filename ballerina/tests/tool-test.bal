@@ -113,8 +113,8 @@ function testExecuteSuccessfulOutput() returns error? {
             }
         }
     };
-    ToolStore toolStore = check new (sendEmailTool);
-    ToolOutput output = check toolStore.execute(sendMailInput);
+    ToolRegistry toolRegistry = check new (sendEmailTool);
+    ToolOutput output = check toolRegistry.execute(sendMailInput);
     if output.value is error {
         test:assertFail("tool execution output is an error");
     }
@@ -160,8 +160,8 @@ function testExecuteErrorOutput() returns error? {
             }
         }
     };
-    ToolStore toolStore = check new (sendEmailTool);
-    ToolOutput output = check toolStore.execute(sendMailInput);
+    ToolRegistry toolRegistry = check new (sendEmailTool);
+    ToolOutput output = check toolRegistry.execute(sendMailInput);
     if output.value !is error {
         test:assertFail("tool execution output is not an error");
     }
@@ -207,8 +207,8 @@ function testExecutionError() returns error? {
             }
         }
     };
-    ToolStore toolStore = check new (sendEmailTool);
-    ToolOutput output = check toolStore.execute(sendMailInput);
+    ToolRegistry toolRegistry = check new (sendEmailTool);
+    ToolOutput output = check toolRegistry.execute(sendMailInput);
     if output.value !is error {
         test:assertFail("tool execution should return an error, yet it is succesfull");
     }
@@ -236,8 +236,8 @@ function testToolWithDefaultParameters() returns error? {
             c: "override"
         }
     };
-    ToolStore toolStore = check new (testToolConfig);
-    ToolOutput output = check toolStore.execute(testToolInput);
+    ToolRegistry toolRegistry = check new (testToolConfig);
+    ToolOutput output = check toolRegistry.execute(testToolInput);
     test:assertEquals(output.value, "required default-one override");
 }
 
@@ -264,17 +264,17 @@ function testExecutionPanicError() returns error? {
             }
         }
     };
-    ToolStore toolStore = check new (sendEmailTool);
-    ToolOutput|Error output = toolStore.execute(sendMailInput);
+    ToolRegistry toolRegistry = check new (sendEmailTool);
+    ToolOutput|Error output = toolRegistry.execute(sendMailInput);
     if output !is Error {
         test:assertFail("tool execution should failed with erronous generation, yet it is succesfull");
     }
 }
 
 @test:Config
-isolated function testInitializingToolStoreWithoutNoTools() returns error? {
-    ToolStore toolStore = check new ();
-    test:assertEquals(toolStore.tools.toArray().length(), 0);
+isolated function testInitializingtoolRegistryWithoutNoTools() returns error? {
+    ToolRegistry toolRegistry = check new ();
+    test:assertEquals(toolRegistry.tools.toArray().length(), 0);
 }
 
 @test:Config

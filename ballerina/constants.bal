@@ -36,3 +36,13 @@ final string:RegExp ACTION_INPUT_REGEX = re `^action.?input`;
 const XML_NAMESPACE = "@xmlns";
 const XML_CONTENT = "#content";
 final string:RegExp XML_MEDIA = re `application/.*xml`;
+
+// Tool execution error messages
+const TOOL_NOT_FOUND_MSG = "Tool is not found. Please check the tool name and retry.";
+const TOOL_INVALID_INPUT_MSG = "Tool execution failed due to invalid inputs. Retry with correct inputs.";
+const TOOL_EXECUTION_FAILED_MSG = "Tool execution failed. Retry with correct inputs.";
+const TOOL_NO_OUTPUT_MSG = "Tool didn't return anything. Probably it is successful. Should we verify using another tool?";
+const TOOL_ERROR_PREFIX = "Error occurred while trying to execute the tool: ";
+const LLM_INVALID_RESPONSE_MSG = "unable to obtain valid response from model";
+const UNEXPECTED_TOOL_ERROR_MSG = "Unexpected error during tool execution";
+const TOOL_EXECUTION_FAILED_OBSERVATION = "Tool execution failed unexpectedly.";
