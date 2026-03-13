@@ -15,6 +15,7 @@
 // under the License.
 
 import ballerina/time;
+import ballerina/io;
 
 # Manages the agent execution loop and LLM reasoning.
 isolated class AgentExecutor {
@@ -44,22 +45,21 @@ isolated class AgentExecutor {
     # + history - Conversation history including the current user query
     # + return - Returns the execution trace
     isolated function execute(string query, string sessionId, Context context,
-            string executionId, ChatMessage[] history) returns ExecutionTrace {
+            string executionId, ChatMessage[] history) returns readonly & ExecutionTrace {
         time:Utc startTime = time:utcNow();
-        Iteration[] iterations = [];
+        (Iteration & readonly)[] iterations = [];
         logExecutionLoopStarted(executionId, sessionId, self.maxIter);
 
-        (ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error)[] steps = [];
-        string? content = ();
+        ((ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error) & readonly)[] steps = [];
+        string? answer = ();
         ExecutionProgress progress = {instruction: "", query, context, executionId, history};
         ChatAssistantMessage? finalAssistantMessage = ();
         int iter = 0;
 
         while iter < self.maxIter {
-            IterationResult iterResult = self.executeIteration(progress, sessionId, context, executionId);
-            ParallelCallOutput|ChatAssistantMessage|ChatFunctionMessage|Error iterationOutput =
-                    getOutputOfIteration(iterResult.step);
-            ChatMessage[] iterationHistory = buildCurrentIterationHistory(progress, history);
+            readonly & IterationResult iterResult = self.executeIteration(progress, sessionId, context, executionId);
+            (ParallelCallOutput|ChatAssistantMessage|ChatFunctionMessage|Error) & readonly iterationOutput = getOutputOfIteration(iterResult.step);
+            readonly & ChatMessage[] iterationHistory = buildCurrentIterationHistory(progress, history);
             if self.verbose {
                 verbosePrint(iterResult.step, iter);
             }
@@ -71,13 +71,13 @@ isolated class AgentExecutor {
                     steps.push(step);
                 }
                 if iterResult.content is string {
-                    content = iterResult.content;
+                    answer = iterResult.content;
                     finalAssistantMessage = iterResult.assistantMessage;
                 }
                 break;
             }
 
-            if step is ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error {
+            if step is (ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error) & readonly {
                 steps.push(step);
             }
             iter += 1;
@@ -85,16 +85,17 @@ isolated class AgentExecutor {
             startTime = time:utcNow();
         }
 
-        FunctionCall[] toolCalls = from ExecutionStep step in progress.executionSteps
+        readonly & FunctionCall[] toolCalls = from ExecutionStep step in progress.executionSteps
             let var llmResponse = step.llmResponse
             where llmResponse is FunctionCall
-            select llmResponse;
-        return {steps, iterations, answer: content, toolCalls, executionSteps: progress.executionSteps};
+            select llmResponse.cloneReadOnly();
+        readonly & ExecutionStep[] executionSteps = progress.executionSteps.cloneReadOnly();
+        return {steps: steps.cloneReadOnly(), iterations: iterations.cloneReadOnly(), answer, toolCalls, executionSteps};
     }
 
     // Executes a single iteration of the agent loop: reason then act.
     private isolated function executeIteration(ExecutionProgress progress, string sessionId,
-            Context context, string executionId) returns IterationResult {
+            Context context, string executionId) returns readonly & IterationResult {
         logLlmReasoningStarted(executionId, sessionId, progress.executionSteps.toString());
 
         FunctionCall[]|string|Error reason = self.selectNextTools(progress, sessionId);
@@ -114,7 +115,7 @@ isolated class AgentExecutor {
             };
         }
 
-        ParallelToolExecutionResult step = self.toolHandler.executeParallel(
+        readonly & ParallelToolExecutionResult step = self.toolHandler.executeParallel(
                 reason, progress, executionId, sessionId, context);
         return {step, shouldStop: false, content: (), assistantMessage: ()};
     }
@@ -127,14 +128,15 @@ isolated class AgentExecutor {
     isolated function selectNextTools(ExecutionProgress progress, string sessionId = DEFAULT_SESSION_ID)
             returns FunctionCall[]|string|Error {
         ChatMessage[] messages = createFunctionCallMessages(progress);
+         io:println("before shift: ***************");
         messages.unshift(...progress.history);
-        ChatCompletionFunctions[] filteredTools = getFilteredTools(
-                self.toolRegistry, self.toolLoadingStrategy, messages, self.model);
+         io:println("after shift: ***************");
 
-        logToolSelectionRequest(progress.executionId, sessionId,
-                messages.toString(), filteredTools.toString());
-
+        ChatCompletionFunctions[] filteredTools = getFilteredTools(self.toolRegistry, self.toolLoadingStrategy, messages, self.model);
+        logToolSelectionRequest(progress.executionId, sessionId, messages.toString(), filteredTools.toString());
+        io:println("before: ***************");
         ChatAssistantMessage response = check self.model->chat(messages, filteredTools);
+        io:println("after: ***************");
         FunctionCall[]? toolCall = getToolCalls(response);
 
         if toolCall is FunctionCall[] {

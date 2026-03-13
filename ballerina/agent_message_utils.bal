@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-isolated function cloneMessages(ChatMessage[] messages) returns ChatMessage[] {
-    ChatMessage[] clonedMessages = [];
+isolated function cloneMessages(ChatMessage[] messages) returns readonly & ChatMessage[] {
+    (ChatMessage & readonly)[] clonedMessages = [];
     foreach ChatMessage msg in messages {
         if msg is ChatUserMessage {
             clonedMessages.push(cloneUserMessage(msg));
@@ -26,36 +26,30 @@ isolated function cloneMessages(ChatMessage[] messages) returns ChatMessage[] {
             continue;
         }
         if msg is ChatAssistantMessage|ChatFunctionMessage {
-            clonedMessages.push(msg.clone());
+            clonedMessages.push(msg.cloneReadOnly());
         }
     }
-    return clonedMessages;
+    return clonedMessages.cloneReadOnly();
 }
 
-isolated function cloneUserMessage(ChatUserMessage message) returns ChatUserMessage {
+isolated function cloneUserMessage(ChatUserMessage message) returns readonly & ChatUserMessage {
     string|Prompt content = message.content;
-    string|Prompt clonedContent = content is string ? content
+    (string|Prompt) & readonly clonedContent = content is string ? content
         : createPrompt(content.strings, content.insertions.cloneReadOnly());
-    ChatUserMessage clonedMessage = {
+    return {
         role: USER,
-        content: clonedContent
+        content: clonedContent,
+        name: message?.name
     };
-    if message?.name is string {
-        clonedMessage.name = message?.name;
-    }
-    return clonedMessage;
 }
 
-isolated function cloneSystemMessage(ChatSystemMessage message) returns ChatSystemMessage {
+isolated function cloneSystemMessage(ChatSystemMessage message) returns readonly & ChatSystemMessage {
     string|Prompt content = message.content;
-    string|Prompt clonedContent = content is string ? content
+    (string|Prompt) & readonly clonedContent = content is string ? content
         : createPrompt(content.strings, content.insertions.cloneReadOnly());
-    ChatSystemMessage clonedMessage = {
+    return {
         role: SYSTEM,
-        content: clonedContent
+        content: clonedContent,
+        name: message?.name
     };
-    if message?.name is string {
-        clonedMessage.name = message?.name;
-    }
-    return clonedMessage;
 }

@@ -38,8 +38,8 @@ function testAgentRunHavingErrorStep() returns error? {
         model = model, tools = [searchTool, calculatorTool], maxIter = 5, verbose = true
     );
     string query = "Random query";
-    ExecutionTrace trace = agent.runExecutor(query);
-    test:assertEquals(trace.answer is (), true);
-    test:assertEquals(trace.steps.length(), 1);
-    test:assertEquals(trace.steps[0] is Error, true);
+    Trace trace = check agent.run(query);
+    test:assertEquals(trace.output is Error, true);
+    test:assertEquals(trace.iterations.length(), 1);
+    test:assertEquals(trace.iterations[0].output is Error, true);
 }

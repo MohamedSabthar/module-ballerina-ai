@@ -35,7 +35,7 @@ isolated class ToolExecutionHandler {
     # + context - Additional context for tool execution
     # + return - Results from all parallel tool executions
     isolated function executeParallel(FunctionCall[] toolCalls, ExecutionProgress progress,
-            string executionId, string sessionId, Context context) returns ParallelToolExecutionResult {
+            string executionId, string sessionId, Context context) returns readonly & ParallelToolExecutionResult {
         ParallelToolExecutionResult parallelToolResult = [];
         map<[FunctionCall, future<ExecutionResult|ExecutionError>]> futures = {};
 
@@ -63,7 +63,7 @@ isolated class ToolExecutionHandler {
             progress.executionSteps.push({llmResponse: toolRec, observation: result.observation});
         }
 
-        return parallelToolResult;
+        return parallelToolResult.cloneReadOnly();
     }
 
     # Executes a single tool call with span tracing and error handling.

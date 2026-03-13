@@ -69,8 +69,8 @@ ${systemPrompt.role}
 ${systemPrompt.instructions}`;
 }
 
-isolated function getOutputOfIteration(ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error|string step)
-    returns ChatAssistantMessage|ChatFunctionMessage|Error|ParallelCallOutput {
+isolated function getOutputOfIteration((ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error|string) & readonly step)
+    returns readonly & (ChatAssistantMessage|ChatFunctionMessage|Error|ParallelCallOutput) {
     if step is Error {
         return step;
     }
@@ -95,7 +95,7 @@ isolated function getOutputOfIteration(ParallelToolExecutionResult|ExecutionResu
                 result.push(msg);
             }
         }
-        return result;
+        return result.cloneReadOnly();
     }
     return {
         role: FUNCTION,
@@ -106,10 +106,10 @@ isolated function getOutputOfIteration(ParallelToolExecutionResult|ExecutionResu
 }
 
 isolated function buildCurrentIterationHistory(ExecutionProgress progress,
-        ChatMessage[] conversationHistoryUpToCurrentUserQuery) returns ChatMessage[] {
+        ChatMessage[] conversationHistoryUpToCurrentUserQuery) returns readonly & ChatMessage[] {
     ChatMessage[] messages = createFunctionCallMessages(progress);
     messages.unshift(...conversationHistoryUpToCurrentUserQuery);
-    return messages;
+    return cloneMessages(messages);
 }
 
 isolated function getObservationString(anydata|error observation) returns string {
