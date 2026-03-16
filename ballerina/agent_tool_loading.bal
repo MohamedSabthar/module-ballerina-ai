@@ -57,7 +57,7 @@ isolated function getSelectedToolsFromAssistantMessage(ChatAssistantMessage assi
     }
 }
 
-isolated function lazyLoadTools(ChatMessage[] messages, ChatCompletionFunctions[] registeredTools,
+isolated function lazyLoadTools(readonly & ChatMessage[] messages, ChatCompletionFunctions[] registeredTools,
         ModelProvider model) returns ChatCompletionFunctions[]? {
     ChatMessage lastMessage = messages[messages.length() - 1];
     if lastMessage !is ChatUserMessage {
@@ -67,10 +67,8 @@ isolated function lazyLoadTools(ChatMessage[] messages, ChatCompletionFunctions[
     ChatUserMessage modifiedUserMessage = modifyUserPromptWithToolsInfo(lastMessage, toolInfo);
 
     // Replace the last user message with the modified one that includes the tools prompt
-    _ = messages.pop();
-    messages.push(modifiedUserMessage);
-
-    ChatAssistantMessage|Error response = model->chat(messages, []);
+    ChatMessage[] updatedMessages = [...messages.slice(0, messages.length() - 1), modifiedUserMessage];
+    ChatAssistantMessage|Error response = model->chat(updatedMessages, []);
     if response is Error {
         return;
     }

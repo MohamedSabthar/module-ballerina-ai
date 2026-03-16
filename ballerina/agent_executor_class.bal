@@ -53,7 +53,6 @@ isolated class AgentExecutor {
         ((ParallelToolExecutionResult|ExecutionResult|ExecutionError|Error) & readonly)[] steps = [];
         string? answer = ();
         ExecutionProgress progress = {instruction: "", query, context, executionId, history};
-        ChatAssistantMessage? finalAssistantMessage = ();
         int iter = 0;
 
         while iter < self.maxIter {
@@ -72,7 +71,6 @@ isolated class AgentExecutor {
                 }
                 if iterResult.content is string {
                     answer = iterResult.content;
-                    finalAssistantMessage = iterResult.assistantMessage;
                 }
                 break;
             }
@@ -149,6 +147,5 @@ isolated class AgentExecutor {
         return content is string ? content : error LlmInvalidGenerationError(LLM_INVALID_RESPONSE_MSG);
     }
 
-    # Returns the maximum iteration count.
     isolated function getMaxIter() returns int => self.maxIter;
 }
