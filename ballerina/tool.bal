@@ -40,6 +40,9 @@ public type Tool record {|
     isolated function caller;
     # Optional authorization configuration required to invoke this tool.
     AgentIdAuthConfig|Scopes auth?;
+    # Name of the skill this tool belongs to, if any. `()` means the tool is always available;
+    # otherwise the tool stays hidden from the model until this skill is activated.
+    string skillName?;
 |};
 type ToolInfo record {|
     string name;
@@ -306,7 +309,8 @@ isolated function registerTool(map<Tool & readonly> toolMap, ToolConfig[] tools)
             variables,
             constants,
             caller: tool.caller,
-            auth: tool.auth
+            auth: tool.auth,
+            skillName: tool.skillName
         };
         toolMap[name] = agentTool.cloneReadOnly();
     }

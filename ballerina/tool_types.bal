@@ -147,6 +147,10 @@ public type ToolConfig record {|
     # Optional authorization configuration required to invoke this tool.
     @display {label: "Authorization Configuration"}
     AgentIdAuthConfig|Scopes auth?;
+    # Name of the skill this tool belongs to, if it was loaded through a `Skill`. Tools without
+    # an owning skill are always available to the agent; skill-owned tools stay hidden from the
+    # model until their skill is activated.
+    string skillName?;
 |};
 
 # Defines the configuration of the Tool annotation.

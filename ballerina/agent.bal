@@ -76,6 +76,12 @@ public type AgentConfiguration record {|
     @display {label: "Tools"}
     (BaseToolKit|ToolConfig|FunctionTool)[] tools = [];
 
+    # Skills available to the agent. Each skill's metadata (name + description) is folded into
+    # the system prompt at construction; its instructions and tools are loaded only once the
+    # agent activates it via the built-in `activate_skill` tool.
+    @display {label: "Skills"}
+    Skill[] skills = [];
+
     # The maximum number of reasoning-action cycles the agent performs to complete the task.
     # A single cycle is one LLM call plus the execution of every tool call returned in
     # that response, so multiple tool calls from one response count as one iteration.
@@ -133,18 +139,28 @@ public isolated distinct class Agent {
     private final string uniqueId = uuid:createRandomUuid();
     private final readonly & ToolSchema[] toolSchemas;
     private string? agentId = ();
+    # Skill catalogue (name + description only) appended to the system prompt when skills are configured.
+    private final string skillsCatalogue;
+    # Skills registered with the agent, keyed by name. Guarded by `lock` since `Skill` is not `readonly`.
+    private map<Skill> skillsByName = {};
+    # Names of the skills activated so far. Guarded by `lock`.
+    private map<()> activatedSkillNames = {};
 
     # Initialize an Agent.
     #
     # + config - Configuration used to initialize an agent
     public isolated function init(@display {label: "Agent Configuration"} *AgentConfiguration config) returns Error? {
+        Skill[] skills = config.skills;
+        string skillsCatalogue = buildSkillsCatalogue(skills);
+
         observe:CreateAgentSpan span = observe:createCreateAgentSpan(config.systemPrompt.role);
         span.addId(self.uniqueId);
-        span.addSystemInstructions(getFomatedSystemPrompt(config.systemPrompt));
+        span.addSystemInstructions(getFomatedSystemPrompt(config.systemPrompt, skillsCatalogue));
 
         INFER_TOOL_COUNT|int maxIter = config.maxIter;
         self.verbose = config.verbose;
         self.systemPrompt = config.systemPrompt.cloneReadOnly();
+        self.skillsCatalogue = skillsCatalogue;
         Memory? memory = config.hasKey("memory") ? config?.memory : check new ShortTermMemory();
         observe:CreateAgentIdentitySpan? agentIdentitySpan = ();
         Credential? agentCredential = config.credential;
@@ -156,7 +172,62 @@ public isolated distinct class Agent {
             }
         }
         do {
-            self.toolStore = check new (...config.tools);
+            (BaseToolKit|ToolConfig|FunctionTool)[] allTools = [];
+            foreach BaseToolKit|ToolConfig|FunctionTool tool in config.tools {
+                allTools.push(tool);
+            }
+            foreach Skill skill in skills {
+                ToolConfig[] taggedSkillTools = tagSkillTools(skill);
+                foreach ToolConfig taggedTool in taggedSkillTools {
+                    allTools.push(taggedTool);
+                }
+            }
+            if skills.length() > 0 {
+                isolated function activateSkillCaller = self.activateSkillTool;
+                ToolConfig activateSkillTool = {
+                    name: ACTIVATE_SKILL_TOOL_NAME,
+                    description: "Activates a skill by its exact name, loading its full instructions " +
+                        "and tools into the conversation. Call this before using anything a skill provides.",
+                    parameters: {
+                        'type: OBJECT,
+                        properties: {
+                            name: {'type: STRING, description: "The exact name of the skill to activate."}
+                        },
+                        required: ["name"]
+                    },
+                    caller: activateSkillCaller
+                };
+                isolated function readResourceCaller = self.readSkillResourceTool;
+                ToolConfig readResourceTool = {
+                    name: READ_SKILL_RESOURCE_TOOL_NAME,
+                    description: "Reads a bundled resource file belonging to an already-activated " +
+                        "skill. Only call this for a file that the skill's instructions specifically referenced.",
+                    parameters: {
+                        'type: OBJECT,
+                        properties: {
+                            skill: {
+                                'type: STRING,
+                                description: "The name of the activated skill that owns the resource."
+                            },
+                            path: {
+                                'type: STRING,
+                                description: "Path to the resource file, relative to the skill directory."
+                            }
+                        },
+                        required: ["skill", "path"]
+                    },
+                    caller: readResourceCaller
+                };
+                allTools.push(activateSkillTool);
+                allTools.push(readResourceTool);
+            }
+            foreach Skill skill in skills {
+                string skillName = skill.getMetadata().name;
+                lock {
+                    self.skillsByName[skillName] = skill;
+                }
+            }
+            self.toolStore = check new (...allTools);
             self.model = config.model;
             self.memory = memory ?: check new ShortTermMemory();
             self.stateless = memory is ();
@@ -191,12 +262,16 @@ public isolated distinct class Agent {
         messages.unshift(...progress.history);
         ToolLoadingStrategy toolLoadingStrategy = self.toolLoadingStrategy;
         ChatMessage lastMessage = messages[messages.length() - 1];
-        ChatCompletionFunctions[] registeredTools = from Tool tool in self.toolStore.tools.toArray()
-            select {
-                name: tool.name,
-                description: tool.description,
-                parameters: tool.variables
-            };
+        // A tool tagged with a skill name stays hidden from the model until `activate_skill` is
+        // called for that skill. Activation is scoped to the agent instance, not to a session
+        // (see the "Deactivation" open question in docs/proposals/agent-skills.md).
+        ChatCompletionFunctions[] registeredTools = [];
+        foreach Tool tool in self.toolStore.tools.toArray() {
+            if self.isToolVisible(tool) {
+                ChatCompletionFunctions fn = {name: tool.name, description: tool.description, parameters: tool.variables};
+                registeredTools.push(fn);
+            }
+        }
         ChatCompletionFunctions[] filteredTools = registeredTools;
         if toolLoadingStrategy == LLM_FILTER && lastMessage is ChatUserMessage {
             ChatCompletionFunctions[]? selectedTools = lazyLoadTools(cloneMessages(messages), registeredTools, self.model);
@@ -280,7 +355,7 @@ public isolated distinct class Agent {
         span.addId(self.uniqueId);
         span.addSessionId(sessionId);
         span.addInput(query);
-        string systemPrompt = getFomatedSystemPrompt(self.systemPrompt);
+        string systemPrompt = getFomatedSystemPrompt(self.systemPrompt, self.skillsCatalogue);
         span.addSystemInstruction(systemPrompt);
 
         Credential? & readonly agentCredential = self.agentCredential;
@@ -336,6 +411,80 @@ public isolated distinct class Agent {
                 : err;
         }
     }
+
+    isolated function findSkill(string name) returns Skill? {
+        lock {
+            return self.skillsByName[name];
+        }
+    }
+
+    isolated function isSkillActivated(string name) returns boolean {
+        lock {
+            return self.activatedSkillNames.hasKey(name);
+        }
+    }
+
+    isolated function isToolVisible(Tool tool) returns boolean {
+        string? owningSkill = tool.skillName;
+        return owningSkill is () || self.isSkillActivated(owningSkill);
+    }
+
+    isolated function activateSkillTool(string name) returns SkillActivationResult|Error {
+        Skill? skill = self.findSkill(name);
+        if skill is () {
+            string[] availableSkills;
+            lock {
+                availableSkills = self.skillsByName.keys().clone();
+            }
+            return error Error(string `No skill named '${name}' is available. ` +
+                string `Available skills: ${availableSkills.toString()}`);
+        }
+        lock {
+            self.activatedSkillNames[name] = ();
+        }
+        SkillMetadata metadata = skill.getMetadata();
+        return {
+            activated: name,
+            instructions: skill.getInstructions(),
+            toolsAdded: metadata.tools ?: []
+        };
+    }
+
+    isolated function readSkillResourceTool(string skill, string path) returns string|Error {
+        if !self.isSkillActivated(skill) {
+            return error Error(string `Skill '${skill}' has not been activated yet. ` +
+                string `Call '${ACTIVATE_SKILL_TOOL_NAME}' first.`);
+        }
+        Skill? found = self.findSkill(skill);
+        if found is () {
+            return error Error(string `No skill named '${skill}' is available.`);
+        }
+        return found.getResource(path);
+    }
+}
+
+isolated function withSkillName(ToolConfig toolConfig, string skillName) returns ToolConfig {
+    // `toolConfig` comes from `Skill.getTools()`, which returns a `& readonly` array — `.clone()`
+    // on an already-readonly value returns the same readonly reference, so mutating a field on it
+    // panics at runtime. Building a fresh record literal avoids that.
+    return {
+        name: toolConfig.name,
+        description: toolConfig.description,
+        parameters: toolConfig.parameters,
+        caller: toolConfig.caller,
+        auth: toolConfig.auth,
+        skillName
+    };
+}
+
+isolated function tagSkillTools(Skill skill) returns ToolConfig[] {
+    string skillName = skill.getMetadata().name;
+    ToolConfig[] tagged = [];
+    foreach ToolConfig toolConfig in skill.getTools() {
+        ToolConfig taggedConfig = withSkillName(toolConfig, skillName);
+        tagged.push(taggedConfig);
+    }
+    return tagged;
 }
 
 isolated function getAnswer(ExecutionTrace executionTrace) returns string|Error {
@@ -360,11 +509,30 @@ isolated function constructError(ExecutionTrace executionTrace) returns Error {
     return error Error("Unable to obtain valid answer from the agent", steps = steps);
 }
 
-isolated function getFomatedSystemPrompt(SystemPrompt systemPrompt) returns string {
-    return string `# Role  
-${systemPrompt.role}  
+isolated function buildSkillsCatalogue(Skill[] skills) returns string {
+    if skills.length() == 0 {
+        return "";
+    }
+    string[] entries = [];
+    foreach Skill skill in skills {
+        SkillMetadata metadata = skill.getMetadata();
+        entries.push(string `- "${metadata.name}": ${metadata.description}`);
+    }
+    return string `
 
-# Instructions  
+# Skills
+You have the following skills available. Each skill's full instructions and tools stay hidden
+until you activate it. Call '${ACTIVATE_SKILL_TOOL_NAME}' with a skill's exact name if its
+description matches the current task, before using anything it provides:
+${string:'join("\n", ...entries)}`;
+}
+
+isolated function getFomatedSystemPrompt(SystemPrompt systemPrompt, string skillsCatalogue = "") returns string {
+    return string `# Role
+${systemPrompt.role}
+
+# Instructions
 ${systemPrompt.instructions}
+${skillsCatalogue}
 `;
 }
