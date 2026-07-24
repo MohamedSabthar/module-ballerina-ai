@@ -272,6 +272,22 @@ deeper.
 Because all three levels are exposed as ordinary tool calls and tool results, `Executor`,
 `ModelProvider`, and the existing `FunctionCall`/`LlmToolResponse` types require no changes.
 
+### Activation scope
+
+Skill activation is scoped to the **session** (the `sessionId` passed to `Agent.run()`), not to the
+agent instance — two concurrent conversations on the same `Agent` activate skills independently, and
+a skill activated in one session stays invisible in another. This mirrors how `Memory` is already
+scoped per session.
+
+`Agent.activateSkillTool`/`Agent.readSkillResourceTool` are ordinary tools, invoked through the same
+`ToolStore.execute` path as any other tool — they have no direct parameter carrying the current
+`sessionId`. To get it, `Agent.runInternal()` stamps the session ID into that call's `Context` before
+starting the reasoning loop (`context.set(<internal key>, sessionId)`), and both methods take a
+`Context` as their first parameter to read it back. This reuses the framework's existing
+`Context`-injection mechanism — the same one that lets any `@ai:AgentTool` function declare a
+`Context` parameter to receive out-of-band data — so activation state naturally rides the same
+request that triggered it, with no new plumbing through `Executor` or `ExecutionProgress`.
+
 ### Interaction with existing toolkits and strategies
 
 A skill's `tools:` front matter resolves through the caller-supplied `toolRegistry`, which can map a
@@ -356,7 +372,7 @@ existing field, type, or public function signature changes.
 
 - **Deactivation.** Should a skill's tools be removable mid-session? Raises questions about
   in-flight `FunctionCall`s referencing a tool being removed; deferred for v1 (skills stay active for
-  the life of the `Memory` session once activated).
+  the life of the session once activated — see "Activation scope" above).
 - **Companion in-code authoring API.** A `Skill` constructible directly from Ballerina values (no
   file), for generated/dynamic skills, analogous to how `FunctionTool` doesn't require an on-disk
   spec. Not needed for v1 but likely wanted once skills are used programmatically.

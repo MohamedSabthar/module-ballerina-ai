@@ -143,8 +143,10 @@ public isolated distinct class Agent {
     private final string skillsCatalogue;
     # Skills registered with the agent, keyed by name. Guarded by `lock` since `Skill` is not `readonly`.
     private map<Skill> skillsByName = {};
-    # Names of the skills activated so far. Guarded by `lock`.
-    private map<()> activatedSkillNames = {};
+    # Names of the skills activated so far, keyed by session ID — activation is scoped to a
+    # session, not to the agent instance, so two conversations on the same agent activate
+    # skills independently. Guarded by `lock`.
+    private map<map<()>> activatedSkillNamesBySession = {};
 
     # Initialize an Agent.
     #
@@ -263,11 +265,10 @@ public isolated distinct class Agent {
         ToolLoadingStrategy toolLoadingStrategy = self.toolLoadingStrategy;
         ChatMessage lastMessage = messages[messages.length() - 1];
         // A tool tagged with a skill name stays hidden from the model until `activate_skill` is
-        // called for that skill. Activation is scoped to the agent instance, not to a session
-        // (see the "Deactivation" open question in docs/proposals/agent-skills.md).
+        // called for that skill, in this session.
         ChatCompletionFunctions[] registeredTools = [];
         foreach Tool tool in self.toolStore.tools.toArray() {
-            if self.isToolVisible(tool) {
+            if self.isToolVisible(sessionId, tool) {
                 ChatCompletionFunctions fn = {name: tool.name, description: tool.description, parameters: tool.variables};
                 registeredTools.push(fn);
             }
@@ -360,6 +361,10 @@ public isolated distinct class Agent {
 
         Credential? & readonly agentCredential = self.agentCredential;
         string? agentId = agentCredential is Credential ? agentCredential.id : ();
+        // Stamped so `activateSkillTool`/`readSkillResourceTool` — invoked as ordinary tools,
+        // with no direct access to this call's `sessionId` parameter — can scope skill
+        // activation to this session instead of to the agent instance.
+        context.set(SKILL_SESSION_CONTEXT_KEY, sessionId);
         ExecutionTrace executionTrace = run(self, systemPrompt, query, self.maxIter, self.verbose, agentId,
                 sessionId, context, executionId);
         ChatUserMessage userMessage = {role: USER, content: query};
@@ -418,18 +423,20 @@ public isolated distinct class Agent {
         }
     }
 
-    isolated function isSkillActivated(string name) returns boolean {
+    isolated function isSkillActivated(string sessionId, string name) returns boolean {
         lock {
-            return self.activatedSkillNames.hasKey(name);
+            map<()>? activatedForSession = self.activatedSkillNamesBySession[sessionId];
+            return activatedForSession is map<()> && activatedForSession.hasKey(name);
         }
     }
 
-    isolated function isToolVisible(Tool tool) returns boolean {
+    isolated function isToolVisible(string sessionId, Tool tool) returns boolean {
         string? owningSkill = tool.skillName;
-        return owningSkill is () || self.isSkillActivated(owningSkill);
+        return owningSkill is () || self.isSkillActivated(sessionId, owningSkill);
     }
 
-    isolated function activateSkillTool(string name) returns SkillActivationResult|Error {
+    isolated function activateSkillTool(Context context, string name) returns SkillActivationResult|Error {
+        string sessionId = getSkillSessionId(context);
         Skill? skill = self.findSkill(name);
         if skill is () {
             string[] availableSkills;
@@ -440,7 +447,9 @@ public isolated distinct class Agent {
                 string `Available skills: ${availableSkills.toString()}`);
         }
         lock {
-            self.activatedSkillNames[name] = ();
+            map<()> activatedForSession = self.activatedSkillNamesBySession[sessionId] ?: {};
+            activatedForSession[name] = ();
+            self.activatedSkillNamesBySession[sessionId] = activatedForSession;
         }
         SkillMetadata metadata = skill.getMetadata();
         return {
@@ -450,8 +459,9 @@ public isolated distinct class Agent {
         };
     }
 
-    isolated function readSkillResourceTool(string skill, string path) returns string|Error {
-        if !self.isSkillActivated(skill) {
+    isolated function readSkillResourceTool(Context context, string skill, string path) returns string|Error {
+        string sessionId = getSkillSessionId(context);
+        if !self.isSkillActivated(sessionId, skill) {
             return error Error(string `Skill '${skill}' has not been activated yet. ` +
                 string `Call '${ACTIVATE_SKILL_TOOL_NAME}' first.`);
         }
@@ -461,6 +471,22 @@ public isolated distinct class Agent {
         }
         return found.getResource(path);
     }
+}
+
+# Key used to stamp the current `run()` call's session ID into its `Context`, so that
+# `Agent.activateSkillTool`/`Agent.readSkillResourceTool` — invoked as ordinary tools via the
+# same reflection-based `Context` injection any tool function can use — can scope skill
+# activation to that session.
+const SKILL_SESSION_CONTEXT_KEY = "ai.internal.skillSessionId";
+
+isolated function getSkillSessionId(Context context) returns string {
+    if context.hasKey(SKILL_SESSION_CONTEXT_KEY) {
+        ContextEntry sessionId = context.get(SKILL_SESSION_CONTEXT_KEY);
+        if sessionId is string {
+            return sessionId;
+        }
+    }
+    return DEFAULT_SESSION_ID;
 }
 
 isolated function withSkillName(ToolConfig toolConfig, string skillName) returns ToolConfig {

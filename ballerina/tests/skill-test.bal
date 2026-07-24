@@ -40,6 +40,53 @@ isolated function mockGreetToolConfig() returns ToolConfig {
     };
 }
 
+isolated function toChatMessageArrayForTest(ChatMessage[]|ChatUserMessage messages) returns ChatMessage[] {
+    if messages is ChatUserMessage {
+        return [messages];
+    }
+    return messages;
+}
+
+isolated function countCompletedToolCallsForTest(ChatMessage[] history) returns int {
+    int completed = 0;
+    foreach ChatMessage message in history {
+        if message is ChatFunctionMessage {
+            completed = completed + 1;
+        }
+    }
+    return completed;
+}
+
+// Scripts activate_skill -> greetTool -> a final answer, so a real `agent.run()` call
+// exercises the actual tool-execution path (ToolStore.execute -> executeTool ->
+// getInputArgumentsOfTool), not just a direct call to `Agent.activateSkillTool`. This is
+// what proves the `Context` auto-injection into a *bound instance method* (as opposed to a
+// plain function) actually works end to end.
+isolated client class ScriptedGreeterModel {
+    *ModelProvider;
+
+    isolated remote function chat(ChatMessage[]|ChatUserMessage messages, ChatCompletionFunctions[] tools = [],
+            string? stop = ()) returns ChatAssistantMessage|Error {
+        ChatMessage[] history = toChatMessageArrayForTest(messages);
+        int completed = countCompletedToolCallsForTest(history);
+        if completed == 0 {
+            return {
+                role: ASSISTANT,
+                toolCalls: [{name: ACTIVATE_SKILL_TOOL_NAME, arguments: {"name": "greeter"}}]
+            };
+        }
+        if completed == 1 {
+            return {
+                role: ASSISTANT,
+                toolCalls: [{name: "greetTool", arguments: {"name": "World"}}]
+            };
+        }
+        return {role: ASSISTANT, content: "Done greeting."};
+    }
+
+    isolated remote function generate(Prompt prompt, typedesc<anydata> td = <>) returns td|Error = external;
+}
+
 @test:Config {}
 function testReadSkillWithToolsAndResources() returns error? {
     Skill skill = check readSkill(GREETER_SKILL_DIR, {"greetTool": mockGreetToolConfig()});
@@ -130,16 +177,16 @@ function testAgentRegistersSkillToolsAndMetaTools() returns error? {
     test:assertTrue(toolNames.indexOf(ACTIVATE_SKILL_TOOL_NAME) is int);
     test:assertTrue(toolNames.indexOf(READ_SKILL_RESOURCE_TOOL_NAME) is int);
 
-    // The skill's tool is hidden from the model until the skill is activated.
+    // The skill's tool is hidden from the model until the skill is activated, in this session.
     boolean greetToolVisibleBeforeActivation = false;
     foreach Tool tool in tools {
         if tool.name == "greetTool" {
-            greetToolVisibleBeforeActivation = agent.isToolVisible(tool);
+            greetToolVisibleBeforeActivation = agent.isToolVisible(DEFAULT_SESSION_ID, tool);
         }
     }
     test:assertFalse(greetToolVisibleBeforeActivation);
 
-    SkillActivationResult|Error activation = agent.activateSkillTool("greeter");
+    SkillActivationResult|Error activation = agent.activateSkillTool(new Context(), "greeter");
     if activation is Error {
         test:assertFail("Expected skill activation to succeed: " + activation.message());
     }
@@ -150,7 +197,7 @@ function testAgentRegistersSkillToolsAndMetaTools() returns error? {
     boolean greetToolVisibleAfterActivation = false;
     foreach Tool tool in tools {
         if tool.name == "greetTool" {
-            greetToolVisibleAfterActivation = agent.isToolVisible(tool);
+            greetToolVisibleAfterActivation = agent.isToolVisible(DEFAULT_SESSION_ID, tool);
         }
     }
     test:assertTrue(greetToolVisibleAfterActivation);
@@ -165,17 +212,48 @@ function testAgentReadSkillResourceRequiresActivation() returns error? {
         skills = [skill]
     );
 
-    string|Error beforeActivation = agent.readSkillResourceTool("greeter", "references/style-guide.md");
+    string|Error beforeActivation = agent.readSkillResourceTool(new Context(), "greeter", "references/style-guide.md");
     test:assertTrue(beforeActivation is Error);
 
-    SkillActivationResult|Error activation = agent.activateSkillTool("greeter");
+    SkillActivationResult|Error activation = agent.activateSkillTool(new Context(), "greeter");
     test:assertTrue(activation is SkillActivationResult);
 
-    string|Error afterActivation = agent.readSkillResourceTool("greeter", "references/style-guide.md");
+    string|Error afterActivation = agent.readSkillResourceTool(new Context(), "greeter", "references/style-guide.md");
     if afterActivation is Error {
         test:assertFail("Expected resource read to succeed: " + afterActivation.message());
     }
     test:assertTrue(afterActivation.includes("Keep greetings short"));
+}
+
+@test:Config {}
+function testSkillActivationIsScopedPerSession() returns error? {
+    Skill skill = check readSkill(GREETER_SKILL_DIR, {"greetTool": mockGreetToolConfig()});
+    Agent agent = check new (
+        systemPrompt = {role: "Assistant", instructions: "Help the user."},
+        model = new MockLLM(),
+        skills = [skill]
+    );
+
+    Context sessionAContext = new;
+    sessionAContext.set(SKILL_SESSION_CONTEXT_KEY, "session-a");
+    SkillActivationResult|Error activation = agent.activateSkillTool(sessionAContext, "greeter");
+    test:assertTrue(activation is SkillActivationResult);
+
+    test:assertTrue(agent.isSkillActivated("session-a", "greeter"));
+    test:assertFalse(agent.isSkillActivated("session-b", "greeter"));
+
+    // A resource read scoped to session-b should fail even though session-a activated the skill.
+    Context sessionBContext = new;
+    sessionBContext.set(SKILL_SESSION_CONTEXT_KEY, "session-b");
+    string|Error sessionBRead = agent.readSkillResourceTool(sessionBContext, "greeter", "references/style-guide.md");
+    test:assertTrue(sessionBRead is Error);
+
+    // The same read, scoped to session-a, succeeds.
+    string|Error sessionARead = agent.readSkillResourceTool(sessionAContext, "greeter", "references/style-guide.md");
+    if sessionARead is Error {
+        test:assertFail("Expected resource read to succeed: " + sessionARead.message());
+    }
+    test:assertTrue(sessionARead.includes("Keep greetings short"));
 }
 
 @test:Config {}
@@ -191,4 +269,23 @@ function testAgentWithoutSkillsHasNoMetaTools() returns error? {
     }
     test:assertTrue(toolNames.indexOf(ACTIVATE_SKILL_TOOL_NAME) is ());
     test:assertTrue(toolNames.indexOf(READ_SKILL_RESOURCE_TOOL_NAME) is ());
+}
+
+@test:Config {}
+function testSkillActivationThroughRealToolExecutionLoop() returns error? {
+    Skill skill = check readSkill(GREETER_SKILL_DIR, {"greetTool": mockGreetToolConfig()});
+    Agent agent = check new (
+        systemPrompt = {role: "Assistant", instructions: "Help the user."},
+        model = new ScriptedGreeterModel(),
+        skills = [skill]
+    );
+
+    // The model only ever sees `greetTool` after it calls `activate_skill` itself — proving
+    // the framework's `Context` auto-injection (used here to scope activation to
+    // "session-x") works for a bound instance method exactly as it does for a plain
+    // `@ai:AgentTool` function.
+    string answer = check agent.run("Greet the user named World.", "session-x");
+    test:assertEquals(answer, "Done greeting.");
+    test:assertTrue(agent.isSkillActivated("session-x", "greeter"));
+    test:assertFalse(agent.isSkillActivated("some-other-session", "greeter"));
 }
