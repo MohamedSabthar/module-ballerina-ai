@@ -63,3 +63,5 @@ build
 node_modules
 native/bin
 compiler-plugin-tests/bin
+
+TMP_BBE
