@@ -15,6 +15,12 @@
 // under the License.
 
 # Represents a short-term memory store that retains a fixed number of recent messages by a key.
+#
+# A custom store that also implements `Checkpointer` is automatically used by `ShortTermMemory`
+# to persist human-in-the-loop pause checkpoints too, so one backend (e.g. a database or cache)
+# can durably serve both concerns. Without that, checkpoints fall back to an in-memory store that
+# does not survive a restart. See `ShortTermMemory.init`'s `checkpointer` parameter to plug a
+# different checkpoint backend instead of (or in addition to) this one.
 public type ShortTermMemoryStore isolated object {
 
     # Retrieves the system message, if it was provided, for a given key.

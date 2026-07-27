@@ -860,7 +860,7 @@ isolated function executeAgentLoop(Agent agent, Executor executor, ChatMessage[]
                 pendingRequests: pendingApproval.detail().requests,
                 decisions: pendingDecisions
             };
-            Error? putErr = agent.approvalStore.put(pendingApprovalRecord);
+            Error? putErr = agent.checkpointer.putCheckpoint(pendingApprovalRecord);
             if putErr is Error {
                 log:printError("Failed to persist the pending approval", putErr,
                     executionId = executionId, sessionId = sessionId);

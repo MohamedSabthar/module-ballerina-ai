@@ -453,7 +453,7 @@ function testHumanInTheLoopPartialBulkResumeLeavesRestPending() returns error? {
     if result is ApprovalRequiredError {
         ApprovalRequest[] requests = result.detail().requests;
         test:assertEquals(requests.length(), 2);
-        PendingApproval? firstPending = check agent.approvalStore.get(sessionId);
+        PendingApproval? firstPending = check agent.checkpointer.getCheckpoint(sessionId);
         test:assertTrue(firstPending is PendingApproval);
         int iterationsUsedAtFirstPause = firstPending is PendingApproval ? firstPending.iterationsUsed : -1;
 
@@ -470,7 +470,7 @@ function testHumanInTheLoopPartialBulkResumeLeavesRestPending() returns error? {
         }
         // No new `reason()` call happened between the two pauses, so the budget accounting
         // carried across them must be identical.
-        PendingApproval? secondPending = check agent.approvalStore.get(sessionId);
+        PendingApproval? secondPending = check agent.checkpointer.getCheckpoint(sessionId);
         test:assertTrue(secondPending is PendingApproval);
         if secondPending is PendingApproval {
             test:assertEquals(secondPending.iterationsUsed, iterationsUsedAtFirstPause);
@@ -702,15 +702,19 @@ function testRunClearsExpiredPendingApprovalAndProceeds() returns error? {
     test:assertTrue(resumed is ApprovalExpiredError);
 }
 
-// A test-only store that always returns a deliberately corrupted `PendingApproval`
-// (an out-of-range `historyPrefixLength` for an empty `history`) regardless of session ID,
-// and tracks whether `remove` was ever called - used to exercise the fail-fast/self-healing
-// behavior around corrupted state without reaching into `InMemoryApprovalStore`'s private
-// state. Rebuilds the record fresh on every call instead of storing one directly, since
-// `PendingApproval` isn't provably `Cloneable` (its `history: ChatMessage[]` may carry
-// `Prompt`-typed content), so it can't be held in an `isolated class` field directly.
-isolated class FixedApprovalStore {
-    *ApprovalStore;
+// A test-only memory whose `Checkpointer` side always returns a deliberately corrupted
+// `PendingApproval` (an out-of-range `historyPrefixLength` for an empty `history`) regardless of
+// session ID, and tracks whether `removeCheckpoint` was ever called - used to exercise the
+// fail-fast/self-healing behavior around corrupted state without reaching into
+// `InMemoryCheckpointer`'s private state. Its `Memory` side is a no-op (empty history), since
+// these tests only care about the checkpoint path. Injected via `memory` (the checkpoint store
+// is now sourced from the agent's memory). Rebuilds the record fresh on every call instead of
+// storing one directly, since `PendingApproval` isn't provably `Cloneable` (its
+// `history: ChatMessage[]` may carry `Prompt`-typed content), so it can't be held in an
+// `isolated class` field directly.
+isolated class FixedCheckpointMemory {
+    *Memory;
+    *Checkpointer;
     private final string fixedId;
     private boolean removeCalled = false;
 
@@ -742,14 +746,23 @@ isolated class FixedApprovalStore {
         decisions: [()]
     };
 
-    public isolated function put(PendingApproval approval) returns Error? => ();
+    // ---- Memory (no-op: these tests exercise only the checkpoint path) ----
+    public isolated function get(string sessionId) returns ChatMessage[]|MemoryError => [];
 
-    public isolated function get(string sessionId) returns PendingApproval?|Error => self.buildFixedApproval(sessionId);
+    public isolated function update(string sessionId, ChatMessage|ChatMessage[] message) returns MemoryError? => ();
 
-    public isolated function take(string sessionId) returns PendingApproval?|Error =>
+    public isolated function delete(string sessionId) returns MemoryError? => ();
+
+    // ---- Checkpointer ----
+    public isolated function putCheckpoint(PendingApproval approval) returns Error? => ();
+
+    public isolated function getCheckpoint(string sessionId) returns PendingApproval?|Error =>
         self.buildFixedApproval(sessionId);
 
-    public isolated function remove(string sessionId) returns Error? {
+    public isolated function takeCheckpoint(string sessionId) returns PendingApproval?|Error =>
+        self.buildFixedApproval(sessionId);
+
+    public isolated function removeCheckpoint(string sessionId) returns Error? {
         lock {
             self.removeCalled = true;
         }
@@ -766,12 +779,12 @@ isolated class FixedApprovalStore {
 @test:Config
 function testRunClearsCorruptedPendingApprovalAndProceeds() returns error? {
     string sessionId = "hitl-run-clears-corrupted-session";
-    FixedApprovalStore store = new ("corrupted-approval-1");
+    FixedCheckpointMemory checkpointMemory = new ("corrupted-approval-1");
     Agent agent = check new ({
         systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
         model: new HitlMockLLM(),
         tools: [hitlRefundTool],
-        approval: {store}
+        memory: checkpointMemory
     });
 
     // The pre-existing pending approval is corrupted (historyPrefixLength out of range for an
@@ -786,12 +799,12 @@ function testRunClearsCorruptedPendingApprovalAndProceeds() returns error? {
 @test:Config
 function testResumeFailsFastOnCorruptedHistory() returns error? {
     string sessionId = "hitl-resume-corrupted-session";
-    FixedApprovalStore store = new ("corrupted-approval-2");
+    FixedCheckpointMemory checkpointMemory = new ("corrupted-approval-2");
     Agent agent = check new ({
         systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
         model: new HitlMockLLM(),
         tools: [hitlRefundTool],
-        approval: {store}
+        memory: checkpointMemory
     });
 
     // The corrupted-history check happens before id validation, so the id supplied here
@@ -807,17 +820,17 @@ function testResumeFailsFastOnCorruptedHistory() returns error? {
 @test:Config
 function testGetPendingApprovalTreatsCorruptedAsAbsentWithoutMutating() returns error? {
     string sessionId = "hitl-get-corrupted-session";
-    FixedApprovalStore store = new ("corrupted-approval-3");
+    FixedCheckpointMemory checkpointMemory = new ("corrupted-approval-3");
     Agent agent = check new ({
         systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
         model: new HitlMockLLM(),
         tools: [hitlRefundTool],
-        approval: {store}
+        memory: checkpointMemory
     });
 
     ApprovalRequest[]? pending = check agent.getPendingApproval(sessionId);
     test:assertEquals(pending, ());
-    test:assertFalse(store.wasRemoveCalled());
+    test:assertFalse(checkpointMemory.wasRemoveCalled());
 }
 
 @test:Config
@@ -1063,6 +1076,157 @@ function testConditionalApprovalPanickingRuleFailsSafeToRequiringApproval() retu
     // still pause for approval.
     string|Error result = agent.run("Refund order ORD-1", "hitl-conditional-panic-session");
     test:assertTrue(result is ApprovalRequiredError);
+}
+
+// ---- Unified memory / checkpointer ----
+
+// A store that is both a message store and a `Checkpointer`, delegating each concern to a
+// built-in in-memory implementation and recording whether a checkpoint was ever persisted to
+// it. Used to prove that when the configured store is checkpoint-capable, pause state is routed
+// to it (durable path) rather than to `ShortTermMemory`'s in-memory fallback.
+isolated class CheckpointCapableStore {
+    *ShortTermMemoryStore;
+    *Checkpointer;
+    private final InMemoryShortTermMemoryStore messages;
+    private final InMemoryCheckpointer checkpoints = new;
+    private boolean putCheckpointCalled = false;
+
+    isolated function init() returns MemoryError? {
+        self.messages = check new InMemoryShortTermMemoryStore();
+    }
+
+    public isolated function getChatSystemMessage(string key) returns ChatSystemMessage|MemoryError? =>
+        self.messages.getChatSystemMessage(key);
+    public isolated function getChatInteractiveMessages(string key) returns ChatInteractiveMessage[]|MemoryError =>
+        self.messages.getChatInteractiveMessages(key);
+    public isolated function getAll(string key)
+            returns [ChatSystemMessage, ChatInteractiveMessage...]|ChatInteractiveMessage[]|MemoryError =>
+        self.messages.getAll(key);
+    public isolated function put(string key, ChatMessage|ChatMessage[] message) returns MemoryError? =>
+        self.messages.put(key, message);
+    public isolated function removeChatSystemMessage(string key) returns MemoryError? =>
+        self.messages.removeChatSystemMessage(key);
+    public isolated function removeChatInteractiveMessages(string key, int? count = ()) returns MemoryError? =>
+        self.messages.removeChatInteractiveMessages(key, count);
+    public isolated function removeAll(string key) returns MemoryError? => self.messages.removeAll(key);
+    public isolated function isFull(string key) returns boolean|MemoryError => self.messages.isFull(key);
+    public isolated function getCapacity() returns int => self.messages.getCapacity();
+
+    public isolated function putCheckpoint(PendingApproval approval) returns Error? {
+        lock {
+            self.putCheckpointCalled = true;
+        }
+        return self.checkpoints.putCheckpoint(approval);
+    }
+    public isolated function getCheckpoint(string sessionId) returns PendingApproval?|Error =>
+        self.checkpoints.getCheckpoint(sessionId);
+    public isolated function removeCheckpoint(string sessionId) returns Error? =>
+        self.checkpoints.removeCheckpoint(sessionId);
+    public isolated function takeCheckpoint(string sessionId) returns PendingApproval?|Error =>
+        self.checkpoints.takeCheckpoint(sessionId);
+
+    public isolated function wasPutCheckpointCalled() returns boolean {
+        lock {
+            return self.putCheckpointCalled;
+        }
+    }
+}
+
+@test:Config
+function testCheckpointDelegatesToCheckpointerCapableStore() returns error? {
+    CheckpointCapableStore store = check new;
+    ShortTermMemory memory = check new (store = store);
+    Agent agent = check new ({
+        systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
+        model: new HitlMockLLM(),
+        tools: [hitlRefundTool],
+        memory
+    });
+    string sessionId = "hitl-durable-store-session";
+
+    string|Error result = agent.run("Refund order ORD-1", sessionId);
+    test:assertTrue(result is ApprovalRequiredError);
+    // The pause was persisted to the checkpoint-capable store, not to `ShortTermMemory`'s
+    // in-memory fallback, and is readable back from that same store.
+    test:assertTrue(store.wasPutCheckpointCalled());
+    PendingApproval? persisted = check store.getCheckpoint(sessionId);
+    test:assertTrue(persisted is PendingApproval);
+
+    string|Error resumed = result is ApprovalRequiredError
+        ? agent.resume(sessionId, singleDecision(result, {approver: "tester"}))
+        : result;
+    test:assertTrue(resumed is string);
+    if resumed is string {
+        test:assertTrue(resumed.includes("Refunded 50.0 for ORD-1"), resumed);
+    }
+    // On completion the checkpoint was claimed (removed) from the store.
+    PendingApproval? afterResume = check store.getCheckpoint(sessionId);
+    test:assertEquals(afterResume, ());
+}
+
+// A message-only `Memory` that does not implement `Checkpointer`, to exercise the agent's
+// in-memory checkpoint fallback (and the accompanying warning) while HITL still works.
+isolated class MessageOnlyMemory {
+    *Memory;
+    private final InMemoryShortTermMemoryStore store;
+
+    isolated function init() returns MemoryError? {
+        self.store = check new InMemoryShortTermMemoryStore();
+    }
+
+    public isolated function get(string sessionId) returns ChatMessage[]|MemoryError => self.store.getAll(sessionId);
+    public isolated function update(string sessionId, ChatMessage|ChatMessage[] message) returns MemoryError? =>
+        self.store.put(sessionId, message);
+    public isolated function delete(string sessionId) returns MemoryError? => self.store.removeAll(sessionId);
+}
+
+@test:Config
+function testMemoryWithoutCheckpointerFallsBackAndStillWorks() returns error? {
+    MessageOnlyMemory memory = check new;
+    Agent agent = check new ({
+        systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
+        model: new HitlMockLLM(),
+        tools: [hitlRefundTool],
+        memory
+    });
+    string sessionId = "hitl-fallback-memory-session";
+
+    // The memory isn't checkpoint-capable, so pauses use the in-memory fallback (a warning is
+    // logged at agent init). HITL must still work end to end within the process.
+    string|Error result = agent.run("Refund order ORD-1", sessionId);
+    test:assertTrue(result is ApprovalRequiredError);
+    string|Error resumed = result is ApprovalRequiredError
+        ? agent.resume(sessionId, singleDecision(result, {approver: "tester"}))
+        : result;
+    test:assertTrue(resumed is string);
+    if resumed is string {
+        test:assertTrue(resumed.includes("Refunded 50.0 for ORD-1"), resumed);
+    }
+}
+
+@test:Config
+function testExplicitCheckpointerOverridesCheckpointCapableStore() returns error? {
+    // The store IS checkpoint-capable, but an explicit `checkpointer` is also supplied - it must
+    // win, so a caller can route pause state somewhere other than the message store on purpose
+    // (e.g. a separate, faster-expiring backend) even when the store could have served both.
+    CheckpointCapableStore store = check new;
+    InMemoryCheckpointer explicitCheckpointer = new;
+    ShortTermMemory memory = check new (store = store, checkpointer = explicitCheckpointer);
+    Agent agent = check new ({
+        systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
+        model: new HitlMockLLM(),
+        tools: [hitlRefundTool],
+        memory
+    });
+    string sessionId = "hitl-explicit-checkpointer-session";
+
+    string|Error result = agent.run("Refund order ORD-1", sessionId);
+    test:assertTrue(result is ApprovalRequiredError);
+    // The store's own checkpoint capability was bypassed entirely.
+    test:assertFalse(store.wasPutCheckpointCalled());
+    // The pause landed in the explicitly-supplied checkpointer instead.
+    PendingApproval? persisted = check explicitCheckpointer.getCheckpoint(sessionId);
+    test:assertTrue(persisted is PendingApproval);
 }
 
 @test:Config

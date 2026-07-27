@@ -129,8 +129,9 @@ public isolated distinct class Agent {
     final cache:Cache tokenManager = new ();
     # Authentication configuration used for acquiring OAuth tokens when accessing secured tools.
     final readonly & Credential? agentCredential;
-    # Store used to persist pending human approvals across pause/resume.
-    final ApprovalStore approvalStore;
+    # Persists HITL pause checkpoints. Sourced from `memory` when it implements `Checkpointer`
+    # (the built-in `ShortTermMemory` does), otherwise an in-memory fallback.
+    final Checkpointer checkpointer;
     # Approval rule for every tool that requires human approval before execution, keyed by
     # tool name. A tool's own declaration (annotation or `ToolConfig`) takes precedence over an
     # entry with the same name in `ApprovalConfig.tools`.
@@ -179,7 +180,6 @@ public isolated distinct class Agent {
             self.maxIter = maxIter is INFER_TOOL_COUNT ?
                 int:max(self.toolSchemas.length(), DEFAULT_MINIMUM_MAX_ITERATIONS) : maxIter;
             ApprovalConfig? approvalConfig = config.approval;
-            self.approvalStore = approvalConfig?.store ?: new InMemoryApprovalStore();
             map<RequiresApproval> approvalRules = {};
             foreach Tool tool in self.toolStore.tools {
                 if tool.requiresApproval !is false {
@@ -201,6 +201,26 @@ public isolated distinct class Agent {
                 }
             }
             self.approvalRules = approvalRules.cloneReadOnly();
+            // The HITL pause checkpoint is persisted through `memory` when it is checkpoint-capable
+            // (the built-in `ShortTermMemory` is), so a single configured store serves both the
+            // conversation history and the pause state. Otherwise fall back to an in-memory
+            // checkpointer, warning if any tool can actually gate, since pauses then won't survive
+            // a restart or a run on another replica.
+            // Narrow through `any`: `self.memory is Checkpointer` directly yields the
+            // object-intersection type `Memory & Checkpointer`, which the code generator cannot
+            // emit. Widening to `any` first makes the test narrow to a plain `Checkpointer`.
+            any agentMemory = self.memory;
+            if agentMemory is Checkpointer {
+                self.checkpointer = agentMemory;
+            } else {
+                self.checkpointer = new InMemoryCheckpointer();
+                if approvalRules.length() > 0 {
+                    log:printWarn("The configured memory does not support durable checkpointing; " +
+                        "human-in-the-loop pauses will not survive a restart or run on another " +
+                        "replica. Use `ShortTermMemory` (or a `Memory` that implements " +
+                        "`Checkpointer`) for durable human-in-the-loop.");
+                }
+            }
             self.approvalTimeout = approvalConfig?.timeout;
             span.addTools(self.toolStore.getToolsInfo());
             if agentIdentitySpan is observe:CreateAgentIdentitySpan {
@@ -305,16 +325,16 @@ public isolated distinct class Agent {
             Context context = new, boolean withTrace = false) returns string|Trace|Error {
         // A prior call on this session may still be awaiting a human decision. Starting a
         // fresh run regardless would silently orphan that pending approval (and, if this new
-        // run also happens to pause, `approvalStore.put` would overwrite it outright) - so
+        // run also happens to pause, `checkpointer.put` would overwrite it outright) - so
         // check first, rather than let a new, unrelated turn interleave with an unresolved one.
-        PendingApproval?|Error existingApprovalResult = self.approvalStore.get(sessionId);
+        PendingApproval?|Error existingApprovalResult = self.checkpointer.getCheckpoint(sessionId);
         if existingApprovalResult is Error {
             return existingApprovalResult;
         }
         if existingApprovalResult is PendingApproval {
             if isApprovalExpired(existingApprovalResult) || !isPendingApprovalHistoryValid(existingApprovalResult) {
                 log:printWarn("Clearing a stale pending approval to allow a new run", sessionId = sessionId);
-                Error? removeErr = self.approvalStore.remove(sessionId);
+                Error? removeErr = self.checkpointer.removeCheckpoint(sessionId);
                 if removeErr is Error {
                     log:printError("Failed to remove the stale pending approval", removeErr, sessionId = sessionId);
                 }
@@ -411,7 +431,7 @@ public isolated distinct class Agent {
     # + sessionId - The ID associated with the agent memory
     # + return - Every currently pending approval request, `()` if none is pending, or an `ai:Error`
     public isolated function getPendingApproval(string sessionId) returns ApprovalRequest[]?|Error {
-        PendingApproval?|Error pendingApprovalResult = self.approvalStore.get(sessionId);
+        PendingApproval?|Error pendingApprovalResult = self.checkpointer.getCheckpoint(sessionId);
         if pendingApprovalResult is Error {
             return pendingApprovalResult;
         }
@@ -435,7 +455,7 @@ public isolated distinct class Agent {
         // `executeAgentLoop`'s pause branch already unconditionally re-persists a fresh
         // `PendingApproval` if this call pauses again (e.g. another gate still undecided in the
         // same batch), so claiming here composes correctly with that existing flow.
-        PendingApproval?|Error pendingApprovalResult = self.approvalStore.take(sessionId);
+        PendingApproval?|Error pendingApprovalResult = self.checkpointer.takeCheckpoint(sessionId);
         if pendingApprovalResult is Error {
             return pendingApprovalResult;
         }
@@ -455,7 +475,7 @@ public isolated distinct class Agent {
             );
             return error Error("The pending approval for session '" + sessionId + "' has a corrupted history " +
                     "snapshot and cannot be resumed. This should never happen with the built-in " +
-                    "`InMemoryApprovalStore`; check any custom `ApprovalStore` implementation in use.");
+                    "`InMemoryCheckpointer`; check any custom `Checkpointer` implementation in use.");
         }
 
         // Not the claimed record's fault - nothing was actually resolved - so restore it
@@ -495,7 +515,7 @@ public isolated distinct class Agent {
     # + pendingApproval - The claimed pending approval to restore, unchanged
     # + sessionId - The ID associated with the agent memory
     private isolated function restoreClaimedApproval(PendingApproval pendingApproval, string sessionId) {
-        Error? restoreErr = self.approvalStore.put(pendingApproval);
+        Error? restoreErr = self.checkpointer.putCheckpoint(pendingApproval);
         if restoreErr is Error {
             log:printError("Failed to restore the claimed pending approval after an invalid resume() call",
                     restoreErr, sessionId = sessionId);
