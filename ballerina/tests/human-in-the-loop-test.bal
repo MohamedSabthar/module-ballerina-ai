@@ -672,36 +672,6 @@ function testRunWhilePendingApprovalReturnsSamePause() returns error? {
     }
 }
 
-@test:Config
-function testRunClearsExpiredPendingApprovalAndProceeds() returns error? {
-    Agent agent = check new ({
-        systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
-        model: new HitlMockLLM(),
-        tools: [hitlRefundTool],
-        approval: {timeout: -1}
-    });
-    string sessionId = "hitl-run-clears-expired-session";
-
-    string|Error firstResult = agent.run("Refund order ORD-1", sessionId);
-    test:assertTrue(firstResult is ApprovalRequiredError);
-
-    // The pending approval is already expired the instant it's created (timeout: -1). A new
-    // run() should clear it and proceed fresh, rather than surfacing the stale pause forever.
-    string|Error secondResult = agent.run("Refund order ORD-1", sessionId);
-    test:assertTrue(secondResult is ApprovalRequiredError);
-    if firstResult is ApprovalRequiredError && secondResult is ApprovalRequiredError {
-        // It's a genuinely new pause (fresh id), not the stale one being replayed.
-        test:assertNotEquals(secondResult.detail().requests[0].id, firstResult.detail().requests[0].id);
-    }
-
-    // The same `timeout: -1` config applies to the second pause too, so it is also already
-    // expired - resume() correctly classifies it as such (rather than "not found"), proving
-    // the existing expiry handling in `resumeInternal` still works on top of the new guard.
-    // The expiry check happens before id validation, so the id supplied here doesn't matter.
-    string|Error resumed = agent.resume(sessionId, {"any-id": {approver: "tester"}});
-    test:assertTrue(resumed is ApprovalExpiredError);
-}
-
 // A test-only memory whose `Checkpointer` side always returns a deliberately corrupted
 // `PendingApproval` (an out-of-range `historyPrefixLength` for an empty `history`) regardless of
 // session ID, and tracks whether `removeCheckpoint` was ever called - used to exercise the

@@ -589,9 +589,6 @@ isolated function buildApprovalRequest(Agent agent, FunctionCall call, string se
         arguments: call.arguments ?: {},
         toolCallId: call.id,
         requestedAt: time:utcNow(),
-        expiresAt: agent.approvalTimeout is decimal
-            ? time:utcAddSeconds(time:utcNow(), <decimal>agent.approvalTimeout)
-            : (),
         batchIndex
     };
 }
@@ -618,8 +615,8 @@ isolated function applySuppliedDecisions(ApprovalRequest[] pendingRequests, Huma
 }
 
 # The previously issued `ApprovalRequest` for `batchIndex`, if `pendingRequests` has one. Used
-# to keep a request's `id` (and `requestedAt`/`expiresAt`) stable across a re-pause instead of
-# minting a new one for a call that was already surfaced to the caller.
+# to keep a request's `id` (and `requestedAt`) stable across a re-pause instead of minting a new
+# one for a call that was already surfaced to the caller.
 #
 # + pendingRequests - The requests surfaced before this `resume()` call
 # + batchIndex - The batch position to look up

@@ -136,8 +136,6 @@ public isolated distinct class Agent {
     # tool name. A tool's own declaration (annotation or `ToolConfig`) takes precedence over an
     # entry with the same name in `ApprovalConfig.tools`.
     final readonly & map<RequiresApproval> approvalRules;
-    # Optional expiry duration (in seconds) for a pending approval.
-    final decimal? approvalTimeout;
     # Indicates whether multiple tool calls from a single LLM response are executed in parallel.
     final boolean executeToolCallsInParallel;
     private final int maxIter;
@@ -221,7 +219,6 @@ public isolated distinct class Agent {
                         "`Checkpointer`) for durable human-in-the-loop.");
                 }
             }
-            self.approvalTimeout = approvalConfig?.timeout;
             span.addTools(self.toolStore.getToolsInfo());
             if agentIdentitySpan is observe:CreateAgentIdentitySpan {
                 agentIdentitySpan.close();
@@ -332,11 +329,11 @@ public isolated distinct class Agent {
             return existingApprovalResult;
         }
         if existingApprovalResult is PendingApproval {
-            if isApprovalExpired(existingApprovalResult) || !isPendingApprovalHistoryValid(existingApprovalResult) {
-                log:printWarn("Clearing a stale pending approval to allow a new run", sessionId = sessionId);
+            if !isPendingApprovalHistoryValid(existingApprovalResult) {
+                log:printWarn("Clearing a corrupted pending approval to allow a new run", sessionId = sessionId);
                 Error? removeErr = self.checkpointer.removeCheckpoint(sessionId);
                 if removeErr is Error {
-                    log:printError("Failed to remove the stale pending approval", removeErr, sessionId = sessionId);
+                    log:printError("Failed to remove the corrupted pending approval", removeErr, sessionId = sessionId);
                 }
                 // Fall through - proceed with a fresh run below.
             } else {
@@ -435,8 +432,7 @@ public isolated distinct class Agent {
         if pendingApprovalResult is Error {
             return pendingApprovalResult;
         }
-        if pendingApprovalResult is () || isApprovalExpired(pendingApprovalResult)
-                || !isPendingApprovalHistoryValid(pendingApprovalResult) {
+        if pendingApprovalResult is () || !isPendingApprovalHistoryValid(pendingApprovalResult) {
             return ();
         }
         return pendingApprovalResult.pendingRequests;
@@ -463,10 +459,6 @@ public isolated distinct class Agent {
             return error ApprovalNotFoundError("No pending approval found for session '" + sessionId + "'.");
         }
         PendingApproval pendingApproval = pendingApprovalResult;
-        if isApprovalExpired(pendingApproval) {
-            // Already removed by `take()` above - nothing more to clean up.
-            return error ApprovalExpiredError("The pending approval for session '" + sessionId + "' has expired.");
-        }
         if !isPendingApprovalHistoryValid(pendingApproval) {
             log:printError("Pending approval has an invalid history snapshot",
                     sessionId = sessionId,
@@ -612,21 +604,6 @@ public isolated distinct class Agent {
                 : err;
         }
     }
-}
-
-// A batch pause is treated as expired as soon as any one of its still-pending requests has
-// expired, even if the others haven't yet: every gated call in the batch was requested within
-// the same turn under the same timeout, so letting only some of them survive would leave the
-// batch in a state where it can never be fully resolved (the expired one can never gather a
-// valid decision) but also never gets cleaned up on its own.
-isolated function isApprovalExpired(PendingApproval pendingApproval) returns boolean {
-    foreach ApprovalRequest request in pendingApproval.pendingRequests {
-        time:Utc? expiresAt = request?.expiresAt;
-        if expiresAt is time:Utc && time:utcDiffSeconds(time:utcNow(), expiresAt) > 0d {
-            return true;
-        }
-    }
-    return false;
 }
 
 // `history` must contain, in order, a system message followed by a user message before the

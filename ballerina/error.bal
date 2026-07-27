@@ -100,9 +100,6 @@ public type MemoryError distinct Error;
 # the LLM proposed several gated calls together and none of them have a decision yet.
 public type ApprovalRequiredError distinct (Error & error<record {| ApprovalRequest[] requests; |}>);
 
-# Raised on `resume` when the pending approval has expired.
-public type ApprovalExpiredError distinct Error;
-
 # Raised on `resume` when no approval is pending for the session.
 public type ApprovalNotFoundError distinct Error;
 

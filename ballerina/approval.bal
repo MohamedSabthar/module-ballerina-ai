@@ -32,8 +32,6 @@ public type ApprovalRequest record {|
     string toolCallId?;
     # The time at which the approval was requested
     time:Utc requestedAt;
-    # The time at which the approval expires, if a timeout is configured
-    time:Utc expiresAt?;
     # Position of this call within the batch the LLM proposed in this turn. Used to apply a
     # `resume()` decision back to the right call, and useful for display ("2 of 3 pending").
     int batchIndex;
@@ -357,6 +355,4 @@ public type ApprovalConfig record {|
     # per-call predicate. Use this for tools that cannot carry
     # `@ai:AgentTool {requiresApproval: true}`, such as tools discovered from a remote MCP server.
     string[]|map<RequiresApproval> tools = [];
-    # Seconds after which a pending approval expires. `()` means it never expires.
-    decimal timeout?;
 |};
