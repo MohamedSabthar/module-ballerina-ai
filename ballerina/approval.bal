@@ -117,44 +117,8 @@ public type PendingApproval record {|
     HumanFeedback?[] decisions = [];
 |};
 
-# Persists an agent's suspended-run checkpoints across a pause/resume, keyed by session ID.
-#
-# A `Memory` (or, more specifically, a `ShortTermMemoryStore`) may additionally implement
-# `Checkpointer`, so a single configured store durably serves both the conversation history and
-# the human-in-the-loop pause state, rather than the caller wiring up two separate backends. If
-# you're writing a custom `ShortTermMemoryStore` and want durable HITL pauses, implement this
-# interface on it too; otherwise pass a `Checkpointer` explicitly via `ShortTermMemory.init`'s
-# `checkpointer` parameter, or accept the default in-memory fallback (not durable across restarts).
-public type Checkpointer isolated object {
-    # Stores (or replaces) the pending approval for its session. Named distinctly from `Memory`'s
-    # message operations so a single object (e.g. `ShortTermMemory`) can implement both.
-    #
-    # + approval - The pending approval to persist
-    # + return - `()` on success, or an `ai:Error` if the operation fails
-    public isolated function putCheckpoint(PendingApproval approval) returns Error?;
-
-    # Returns the pending approval for a session, if any.
-    #
-    # + sessionId - The session to look up
-    # + return - The pending approval, `()` if none is pending, or an `ai:Error` if the operation fails
-    public isolated function getCheckpoint(string sessionId) returns PendingApproval?|Error;
-
-    # Removes the pending approval for a session, if any.
-    #
-    # + sessionId - The session to clear
-    # + return - `()` on success, or an `ai:Error` if the operation fails
-    public isolated function removeCheckpoint(string sessionId) returns Error?;
-
-    # Atomically fetches and removes the pending approval for a session, if any. Used to
-    # "claim" an approval before resolving it, so a concurrent duplicate `resume()` call for
-    # the same session cannot also claim and execute the same approved tool call.
-    #
-    # + sessionId - The session to claim
-    # + return - The claimed pending approval, `()` if none was pending, or an `ai:Error` if the operation fails
-    public isolated function takeCheckpoint(string sessionId) returns PendingApproval?|Error;
-};
-
-# The isolated-safe form of an `Iteration` used only by `InMemoryCheckpointer`. `history` is
+# The isolated-safe form of an `Iteration` used only by `InMemoryShortTermMemoryStore`'s
+# checkpoint state. `history` is
 # converted the same way as `PendingApproval.history` (see `StoredPendingApproval`). `output`
 # narrows `Error` to a `string` summary: `Memory` faces this exact problem for tool
 # observations already — by the time a result reaches `Memory`, any `error` has already been
@@ -234,7 +198,7 @@ isolated function fromStoredIteration(StoredIteration stored) returns Iteration 
     {history: stored.history, output: fromStoredOutputs(stored.output), startTime: stored.startTime,
         endTime: stored.endTime};
 
-# The pending approval as persisted internally by `InMemoryCheckpointer`: identical to
+# The pending approval as persisted internally by `InMemoryShortTermMemoryStore`: identical to
 # `PendingApproval`, except `history` is the isolated-safe `MemoryChatMessage[]` (the same
 # type `ShortTermMemoryStore`/`MessageWindowChatMemory` already use to store messages inside
 # a `lock` block) rather than the plain `ChatMessage[]`, whose `Prompt`-typed content is not
@@ -266,69 +230,27 @@ type StoredPendingApproval record {|
     HumanFeedback?[] decisions;
 |};
 
-# Default in-memory implementation of `Checkpointer`. Used by `ShortTermMemory` as its fallback
-# when the configured `ShortTermMemoryStore` is not itself checkpoint-capable, and as the agent's
-# fallback when the configured `Memory` does not implement `Checkpointer`.
-public isolated class InMemoryCheckpointer {
-    *Checkpointer;
-    private final map<StoredPendingApproval> pending = {};
-
-    public isolated function putCheckpoint(PendingApproval approval) returns Error? {
-        MemoryChatMessage[]|MemoryError history = mapToMemoryChatMessages(approval.history);
-        if history is MemoryError {
-            return history;
-        }
-        StoredIteration[]|MemoryError iterations = toStoredIterations(approval.iterations);
-        if iterations is MemoryError {
-            return iterations;
-        }
-        StoredPendingApproval stored = {
-            sessionId: approval.sessionId,
-            executionId: approval.executionId,
-            iterationsUsed: approval.iterationsUsed,
-            history,
-            historyPrefixLength: approval.historyPrefixLength,
-            iterations,
-            toolCalls: approval.toolCalls,
-            startTime: approval.startTime,
-            originalBatch: approval.originalBatch,
-            pendingRequests: approval.pendingRequests,
-            decisions: approval.decisions
-        };
-        lock {
-            self.pending[approval.sessionId] = stored.clone();
-        }
-    }
-
-    public isolated function getCheckpoint(string sessionId) returns PendingApproval?|Error {
-        StoredPendingApproval? stored;
-        lock {
-            StoredPendingApproval? s = self.pending[sessionId];
-            stored = s is () ? () : s.clone();
-        }
-        if stored is () {
-            return ();
-        }
-        return fromStoredPendingApproval(stored);
-    }
-
-    public isolated function removeCheckpoint(string sessionId) returns Error? {
-        lock {
-            _ = self.pending.removeIfHasKey(sessionId);
-        }
-    }
-
-    public isolated function takeCheckpoint(string sessionId) returns PendingApproval?|Error {
-        StoredPendingApproval? stored;
-        lock {
-            StoredPendingApproval? removed = self.pending.removeIfHasKey(sessionId);
-            stored = removed is () ? () : removed.clone();
-        }
-        if stored is () {
-            return ();
-        }
-        return fromStoredPendingApproval(stored);
-    }
+# Converts a `PendingApproval` into its isolated-safe stored form for persistence inside a
+# `lock` block (see `StoredPendingApproval`).
+#
+# + approval - The pending approval to convert
+# + return - The stored form, or an `ai:MemoryError` if the history/iterations could not be converted
+isolated function toStoredPendingApproval(PendingApproval approval) returns StoredPendingApproval|MemoryError {
+    MemoryChatMessage[] history = check mapToMemoryChatMessages(approval.history);
+    StoredIteration[] iterations = check toStoredIterations(approval.iterations);
+    return {
+        sessionId: approval.sessionId,
+        executionId: approval.executionId,
+        iterationsUsed: approval.iterationsUsed,
+        history,
+        historyPrefixLength: approval.historyPrefixLength,
+        iterations,
+        toolCalls: approval.toolCalls,
+        startTime: approval.startTime,
+        originalBatch: approval.originalBatch,
+        pendingRequests: approval.pendingRequests,
+        decisions: approval.decisions
+    };
 }
 
 isolated function fromStoredPendingApproval(StoredPendingApproval stored) returns PendingApproval => {
@@ -347,8 +269,9 @@ isolated function fromStoredPendingApproval(StoredPendingApproval stored) return
 
 # Human-in-the-loop configuration for an agent.
 #
-# Pause/resume state is persisted through the agent's `Memory` when it implements `Checkpointer`
-# (as the built-in `ShortTermMemory` does), so it is not configured here.
+# Pause/resume state is persisted through the agent's `Memory` when it is a `ShortTermMemory`
+# (which persists checkpoints in its configured `ShortTermMemoryStore`), so it is not configured
+# here.
 public type ApprovalConfig record {|
     # Extra tools that require approval, addressed by name. A `string[]` gates each named tool
     # unconditionally. A `map<RequiresApproval>` gates each key by its value, which may be a

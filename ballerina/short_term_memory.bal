@@ -58,40 +58,31 @@ type OverflowHandlerFunction isolated function (
 
 type OverflowHandler TrimOverflowHandlerConfiguration|OverflowHandlerFunction;
 
-# Represents short-term memory for agents.
+# Represents short-term memory for agents. Persists both the conversation history and
+# human-in-the-loop pause checkpoints in its configured `ShortTermMemoryStore`, so a single
+# store durably serves both concerns.
 public isolated class ShortTermMemory {
     *Memory;
-    *Checkpointer;
 
     private final OverflowHandler overflowHandler;
-    // Where conversation messages live. This should be final, but is not final intentionally, to
-    // enforce using locks.
-    private ShortTermMemoryStore store;
-    // Where human-in-the-loop pause checkpoints live, resolved once at init: the `store` itself
-    // when it is checkpoint-capable (so pauses share the store's durability), otherwise a private
-    // in-memory checkpointer. Mirrors `store` - one unconditional home per concern.
-    private final Checkpointer checkpointer;
+    // Where both conversation messages and human-in-the-loop pause checkpoints live. `final`
+    // because it is assigned once at init and never rebound; the message operations still take a
+    // `lock` on `self` to keep their read-modify-write sequences atomic, while the checkpoint
+    // operations delegate straight to the store, which does its own internal synchronization.
+    private final ShortTermMemoryStore store;
 
     # Initializes short-term memory with an optional store and overflow configuration.
     #
-    # + store - The memory store to use; if not provided, an in-memory store is used. If this
-    # store also implements `Checkpointer`, it is used to persist human-in-the-loop pause
-    # checkpoints too - see `checkpointer` below.
+    # + store - The memory store to use; if not provided, an in-memory store is used. The same
+    # store persists both the conversation history and human-in-the-loop pause checkpoints, so a
+    # store with a durable backend makes both durable.
     # + overflowConfiguration - The strategy to handle overflow; if not provided, trimming is used
-    # + checkpointer - Where human-in-the-loop pause checkpoints are persisted. Only needed if you
-    # want durable checkpoints backed by something other than `store` (e.g. a dedicated backend, or
-    # `store` doesn't implement `Checkpointer`). If not provided: `store` is used when it implements
-    # `Checkpointer` (so one backend serves both concerns), otherwise checkpoints are kept in an
-    # in-memory fallback that does not survive a restart.
     # + return - nil on success, or an `ai:MemoryError` error if the initialization fails
     public isolated function init(ShortTermMemoryStore? store = (),
-                                  OverflowHandlerConfiguration overflowConfiguration = <TrimOverflowHandlerConfiguration> {},
-                                  Checkpointer? checkpointer = ())
+                                  OverflowHandlerConfiguration overflowConfiguration = <TrimOverflowHandlerConfiguration> {})
                             returns MemoryError? {
         do {
-            ShortTermMemoryStore resolvedStore = store ?: check new InMemoryShortTermMemoryStore();
-            self.store = resolvedStore;
-            self.checkpointer = checkpointer ?: resolveCheckpointerFromStore(resolvedStore);
+            self.store = store ?: check new InMemoryShortTermMemoryStore();
 
             if overflowConfiguration is TrimOverflowHandlerConfiguration {
                 self.overflowHandler = overflowConfiguration.cloneReadOnly();
@@ -248,46 +239,28 @@ public isolated class ShortTermMemory {
     # + approval - The pending approval to persist
     # + return - `()` on success, or an `ai:Error` if the operation fails
     public isolated function putCheckpoint(PendingApproval approval) returns Error? =>
-        self.checkpointer.putCheckpoint(approval);
+        self.store.putCheckpoint(approval);
 
     # Returns the pending approval for a session, if any.
     #
     # + sessionId - The session to look up
     # + return - The pending approval, `()` if none is pending, or an `ai:Error` if the operation fails
     public isolated function getCheckpoint(string sessionId) returns PendingApproval?|Error =>
-        self.checkpointer.getCheckpoint(sessionId);
+        self.store.getCheckpoint(sessionId);
 
     # Removes the pending approval for a session, if any.
     #
     # + sessionId - The session to clear
     # + return - `()` on success, or an `ai:Error` if the operation fails
     public isolated function removeCheckpoint(string sessionId) returns Error? =>
-        self.checkpointer.removeCheckpoint(sessionId);
+        self.store.removeCheckpoint(sessionId);
 
     # Atomically fetches and removes the pending approval for a session, if any.
     #
     # + sessionId - The session to claim
     # + return - The claimed pending approval, `()` if none was pending, or an `ai:Error` if the operation fails
     public isolated function takeCheckpoint(string sessionId) returns PendingApproval?|Error =>
-        self.checkpointer.takeCheckpoint(sessionId);
-}
-
-# Resolves the default checkpoint home when no explicit `checkpointer` is supplied to
-# `ShortTermMemory.init`: `store` itself when it also implements `Checkpointer` (so one backend
-# durably serves both messages and human-in-the-loop pause state), otherwise a fresh in-memory
-# checkpointer (pauses will not survive a restart or a run on another replica).
-#
-# + store - The resolved message store to check for checkpoint capability
-# + return - `store` narrowed to `Checkpointer` if it implements it, otherwise a new `InMemoryCheckpointer`
-isolated function resolveCheckpointerFromStore(ShortTermMemoryStore store) returns Checkpointer {
-    // Narrow through `any`: testing `store is Checkpointer` directly yields the object-intersection
-    // type `ShortTermMemoryStore & Checkpointer`, which the code generator cannot emit ("jVM
-    // generation is not supported for type other"). A `ShortTermMemoryStore` genuinely can also be
-    // a `Checkpointer` - Ballerina objects are structurally typed, so a concrete class can include
-    // both `*ShortTermMemoryStore;` and `*Checkpointer;` (this is exactly how one store backs both
-    // concerns); widening to `any` first lets the check narrow to a plain `Checkpointer` instead.
-    any storeValue = store;
-    return storeValue is Checkpointer ? storeValue : new InMemoryCheckpointer();
+        self.store.takeCheckpoint(sessionId);
 }
 
 isolated function handleOverflow(

@@ -218,9 +218,10 @@ public isolated distinct class Agent {
     final cache:Cache tokenManager = new ();
     # Authentication configuration used for acquiring OAuth tokens when accessing secured tools.
     final readonly & Credential? agentCredential;
-    # Persists HITL pause checkpoints. Sourced from `memory` when it implements `Checkpointer`
-    # (the built-in `ShortTermMemory` does), otherwise an in-memory fallback.
-    final Checkpointer checkpointer;
+    # Persists HITL pause checkpoints. The configured `memory` itself when it is a
+    # `ShortTermMemory` (which persists checkpoints in its store), otherwise a private in-memory
+    # `ShortTermMemory` fallback that is not durable across a restart or a run on another replica.
+    final ShortTermMemory checkpointer;
     # Approval rule for every tool that requires human approval before execution, keyed by
     # tool name. A tool's own declaration (annotation or `ToolConfig`) takes precedence over an
     # entry with the same name in `ApprovalConfig.tools`.
@@ -288,24 +289,20 @@ public isolated distinct class Agent {
                 }
             }
             self.approvalRules = approvalRules.cloneReadOnly();
-            // The HITL pause checkpoint is persisted through `memory` when it is checkpoint-capable
-            // (the built-in `ShortTermMemory` is), so a single configured store serves both the
-            // conversation history and the pause state. Otherwise fall back to an in-memory
-            // checkpointer, warning if any tool can actually gate, since pauses then won't survive
-            // a restart or a run on another replica.
-            // Narrow through `any`: `self.memory is Checkpointer` directly yields the
-            // object-intersection type `Memory & Checkpointer`, which the code generator cannot
-            // emit. Widening to `any` first makes the test narrow to a plain `Checkpointer`.
-            any agentMemory = self.memory;
-            if agentMemory is Checkpointer {
+            // The HITL pause checkpoint is persisted through `memory` when it is a
+            // `ShortTermMemory` (which persists checkpoints in its configured store), so a single
+            // configured store serves both the conversation history and the pause state.
+            // Otherwise fall back to a private in-memory `ShortTermMemory`, warning if any tool can
+            // actually gate, since pauses then won't survive a restart or a run on another replica.
+            Memory agentMemory = self.memory;
+            if agentMemory is ShortTermMemory {
                 self.checkpointer = agentMemory;
             } else {
-                self.checkpointer = new InMemoryCheckpointer();
+                self.checkpointer = check new ShortTermMemory();
                 if approvalRules.length() > 0 {
                     log:printWarn("The configured memory does not support durable checkpointing; " +
                         "human-in-the-loop pauses will not survive a restart or run on another " +
-                        "replica. Use `ShortTermMemory` (or a `Memory` that implements " +
-                        "`Checkpointer`) for durable human-in-the-loop.");
+                        "replica. Use `ShortTermMemory` for durable human-in-the-loop.");
                 }
             }
             span.addTools(self.toolStore.getToolsInfo());
@@ -656,7 +653,7 @@ public isolated distinct class Agent {
             );
             return error Error("The pending approval for session '" + sessionId + "' has a corrupted history " +
                     "snapshot and cannot be resumed. This should never happen with the built-in " +
-                    "`InMemoryCheckpointer`; check any custom `Checkpointer` implementation in use.");
+                    "`ShortTermMemory`; check any custom `ShortTermMemoryStore` implementation in use.");
         }
 
         // Not the claimed record's fault - nothing was actually resolved - so restore it
