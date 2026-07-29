@@ -103,6 +103,6 @@ public type ApprovalRequiredError distinct (Error & error<record {| ApprovalRequ
 # Raised on `resume` when no approval is pending for the session.
 public type ApprovalNotFoundError distinct Error;
 
-# Raised on `resume` when a `map<HumanFeedback>` names an id that is not among the approvals
+# Raised on `resume` when a `map<HumanResponse>` names an id that is not among the approvals
 # currently pending for the session (a stale id, a typo, or an id from a different session).
 public type UnknownApprovalIdError distinct Error;

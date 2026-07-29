@@ -37,25 +37,22 @@ public type ApprovalRequest record {|
     int batchIndex;
 |};
 
-# Approves the pending tool call, optionally replacing the proposed arguments.
-public type Approval record {|
-    # If set, the tool is executed with these arguments instead of the proposed ones
-    map<json> arguments?;
-    # Optional identifier of the approver, recorded for auditing
-    string approver?;
-|};
-
-# Rejects the pending tool call. The tool is not executed; `feedback` is used
-# to guide the agent's next step.
-public type Rejection record {|
-    # Guidance shown to the agent: why it was blocked, or what to do instead
-    string feedback;
-    # Optional identifier of the reviewer, recorded for auditing
-    string approver?;
-|};
+# A human reviewer's decision on a pending tool call.
+#
+# Only approval and rejection are supported in this release; replacing the proposed arguments
+# before approval is deferred to a later release.
+public enum ApprovalDecision {
+    APPROVE,
+    REJECT
+}
 
 # Represents a human's decision on a pending tool call.
-public type HumanFeedback Approval|Rejection;
+public type HumanResponse record {|
+    # Whether the call is approved or rejected
+    ApprovalDecision decision;
+    # When rejecting, optional guidance shown to the agent: why it was blocked, or what to do instead
+    string reason?;
+|};
 
 # The specific tool call a `RequiresApproval` predicate is deciding about. Passed as a single
 # record (rather than positional arguments) so the input set can grow later without breaking
@@ -114,7 +111,7 @@ public type PendingApproval record {|
     ApprovalRequest[] pendingRequests = [];
     # One slot per entry in `originalBatch`: `()` if not yet decided (or not gated at all),
     # otherwise the human's decision already gathered for that position
-    HumanFeedback?[] decisions = [];
+    HumanResponse?[] decisions = [];
 |};
 
 # The isolated-safe form of an `Iteration` used only by `InMemoryShortTermMemoryStore`'s
@@ -227,7 +224,7 @@ type StoredPendingApproval record {|
     # One request per gated position in `originalBatch` that still has no decision
     ApprovalRequest[] pendingRequests;
     # One slot per entry in `originalBatch`: `()` if not yet decided, otherwise the human's decision
-    HumanFeedback?[] decisions;
+    HumanResponse?[] decisions;
 |};
 
 # Converts a `PendingApproval` into its isolated-safe stored form for persistence inside a

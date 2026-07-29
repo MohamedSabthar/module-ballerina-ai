@@ -603,7 +603,7 @@ public isolated distinct class Agent {
     # + td - Type descriptor specifying the expected return type format
     # + return - The agent's response or an error
     public isolated function resume(@display {label: "Session ID"} string sessionId,
-            @display {label: "Human Feedback"} map<HumanFeedback> feedback,
+            @display {label: "Human Response"} map<HumanResponse> feedback,
             Context context = new,
             typedesc<Trace|string> td = <>) returns td|Error = @java:Method {
         'class: "io.ballerina.stdlib.ai.Agent"
@@ -624,7 +624,7 @@ public isolated distinct class Agent {
         return pendingApprovalResult.pendingRequests;
     }
 
-    private isolated function resumeInternal(string sessionId, map<HumanFeedback> feedback,
+    private isolated function resumeInternal(string sessionId, map<HumanResponse> feedback,
             Context context = new, boolean withTrace = false) returns string|Trace|Error {
         log:printDebug("Agent resume started",
                 agentId = self.agentId,
