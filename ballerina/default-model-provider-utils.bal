@@ -22,8 +22,13 @@ import ballerina/data.jsondata;
 import ballerina/lang.array;
 import ballerina/lang.runtime;
 
-type ResponseSchema record {|
+# The structured-output schema derived from an expected return type, attached to the agent's
+# final-answer tool so the model returns its answer as a schema-constrained tool call.
+public type ResponseSchema record {|
+    # The JSON schema describing the expected answer shape
     map<json> schema;
+    # Whether the expected type was already a JSON object. When `false`, the answer is wrapped
+    # under a `result` field to satisfy providers that require an object-typed tool input.
     boolean isOriginallyJsonObject = true;
 |};
 
