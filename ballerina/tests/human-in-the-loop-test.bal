@@ -751,6 +751,9 @@ function testRunClearsCorruptedPendingApprovalAndProceeds() returns error? {
     if result is ApprovalRequiredError {
         test:assertNotEquals(result.detail().requests[0].id, "corrupted-approval-1");
     }
+    // The corrupted checkpoint must have been actively cleared, not merely ignored - otherwise a
+    // fresh pause could still be built while stale state lingers.
+    test:assertTrue(checkpointStore.wasRemoveCalled());
 }
 
 @test:Config

@@ -177,6 +177,14 @@ public type DependentlyTypedAgent distinct isolated object {
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new,
             typedesc<Trace|anydata> td = <>) returns td|Error;
+
+    # Returns the approvals currently pending on `sessionId`, if any. Lets callers inspect what a
+    # paused run is waiting on (via the documented abstraction) before deciding how to resume it.
+    #
+    # + sessionId - The ID associated with the agent memory
+    # + return - Every currently pending approval request, `()` if none is pending, or an `ai:Error`
+    public isolated function getPendingApproval(@display {label: "Session ID"} string sessionId)
+            returns ApprovalRequest[]?|Error;
 };
 
 # Represents a reusable agent definition with a fixed `anydata` return type. Implementations typically
@@ -532,7 +540,8 @@ public isolated distinct class Agent {
     #
     # + sessionId - The ID associated with the agent memory
     # + return - Every currently pending approval request, `()` if none is pending, or an `ai:Error`
-    public isolated function getPendingApproval(string sessionId) returns ApprovalRequest[]?|Error {
+    public isolated function getPendingApproval(@display {label: "Session ID"} string sessionId)
+            returns ApprovalRequest[]?|Error {
         PendingApproval?|Error pendingApprovalResult = self.checkpointer.getCheckpoint(sessionId);
         if pendingApprovalResult is Error {
             return pendingApprovalResult;
@@ -666,6 +675,17 @@ public isolated distinct class Agent {
         boolean withTrace = td is typedesc<Trace>;
         Iteration[] iterations = executionTrace.iterations;
         FunctionCall[]? toolCalls = executionTrace.toolCalls.length() == 0 ? () : executionTrace.toolCalls;
+
+        Error? fatalError = executionTrace.fatalError;
+        if fatalError is Error {
+            log:printError(failedLogMessage, fatalError,
+                    executionId = executionId,
+                    agentId = self.agentId,
+                    sessionId = sessionId
+            );
+            span.close(fatalError);
+            return fatalError;
+        }
 
         ApprovalRequiredError? pendingApproval = executionTrace.pendingApproval;
         if pendingApproval is ApprovalRequiredError {
@@ -830,8 +850,15 @@ isolated function parseAnswerAsType(string answer, typedesc<anydata> td) returns
 // `historyPrefixLength >= 2`. The prefix may equal `history.length()` when the very first tool
 // call proposed is the one that paused, so `<=` (not `<`) is the correct upper bound.
 isolated function isPendingApprovalHistoryValid(PendingApproval pendingApproval) returns boolean {
+    ChatMessage[] history = pendingApproval.history;
     int historyPrefixLength = pendingApproval.historyPrefixLength;
-    return historyPrefixLength >= 2 && historyPrefixLength <= pendingApproval.history.length();
+    if historyPrefixLength < 2 || historyPrefixLength > history.length() {
+        return false;
+    }
+    // Consumers unchecked-cast these two roles (see agent-utils.bal and the resume path here), so
+    // this single check must also guarantee the roles, not just the bounds - otherwise a snapshot
+    // from a custom store would panic instead of surfacing the "corrupted history" error.
+    return history[0] is ChatSystemMessage && history[historyPrefixLength - 1] is ChatUserMessage;
 }
 
 isolated function getAnswer(ExecutionTrace executionTrace) returns string|Error {

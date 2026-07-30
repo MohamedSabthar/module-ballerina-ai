@@ -261,6 +261,12 @@ public isolated class InMemoryShortTermMemoryStore {
             if self.messages.hasKey(key) {
                 self.messages.get(key).removeAll();
             }
+
+            // Drop any pending approval checkpoint too, so clearing a session is atomic and an
+            // abandoned pause does not retain its whole history snapshot indefinitely.
+            if self.pending.hasKey(key) {
+                _ = self.pending.remove(key);
+            }
         }
     }
 

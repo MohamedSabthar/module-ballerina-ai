@@ -543,10 +543,13 @@ isolated function findAllGatedIndices(Agent agent, Context context, string sessi
             continue;
         }
         LlmToolResponse parsedOutput = {name: call.name, arguments: call.arguments, id: call.id};
-        boolean isMcpTool = toolStore.isMcpTool(call.name);
-        ToolNotFoundError|ToolInvalidInputError|TokenAcquisitionError|TokenValidationError?
-                validateRes = validateTool(parsedOutput, agent.agentCredential, agent.tokenManager, context,
-                        toolStore.tools, isMcpTool);
+        // Use the pure name/input probe here, not `validateTool`: authorization acquires OAuth
+        // tokens and mutates `context`, which must not happen while merely deciding whether to
+        // pause for approval. Authorization stays on the execution path, where it belongs.
+        Credential? agentCredential = agent.agentCredential;
+        string? agentId = agentCredential is Credential ? agentCredential.id : ();
+        ToolNotFoundError|ToolInvalidInputError? validateRes =
+                validateToolNameAndInput(parsedOutput, toolStore.tools, agentId);
         if validateRes is () && callRequiresApproval(agent, call, sessionId) {
             gated.push(i);
         }
@@ -868,8 +871,19 @@ isolated function executeAgentLoop(Agent agent, Executor executor, ChatMessage[]
             };
             Error? putErr = agent.checkpointer.putCheckpoint(pendingApprovalRecord);
             if putErr is Error {
+                // The pause was not persisted, so there is nothing to claim or resume. Reporting
+                // an `ApprovalRequiredError` here would hand the caller request IDs backed by no
+                // state; surface the persistence failure as a terminal error instead.
                 log:printError("Failed to persist the pending approval", putErr,
                     executionId = executionId, sessionId = sessionId);
+                return {
+                    steps,
+                    iterations: [...priorIterations, ...iterations],
+                    toolCalls: [...priorToolCalls, ...collectToolCalls(executor.progress.executionSteps)],
+                    fatalError: error Error(
+                        "Failed to persist the pending approval; the run cannot be paused for human approval.",
+                        putErr)
+                };
             }
             break;
         }

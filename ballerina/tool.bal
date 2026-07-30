@@ -378,12 +378,19 @@ isolated function mergeInputs(map<json>? inputs, map<json> constants) returns ma
     return inputs;
 }
 
-isolated function validateTool(LlmToolResponse action, Credential? agentCredential, cache:Cache tokenManager, 
-    Context context, map<Tool> & readonly tool, boolean isMcpTool) returns 
-    ToolNotFoundError|ToolInvalidInputError|TokenAcquisitionError|TokenValidationError? {
+# Validates the tool name and merges/validates its inputs, without any side effects. Pure by
+# design so it can double as a "would this call pass validation?" probe (e.g. when deciding
+# whether a call should pause for human approval) without acquiring tokens or making network
+# calls. Authorization is intentionally left to `validateTool`.
+#
+# + action - The proposed tool call (name and arguments)
+# + tool - The available tools
+# + agentId - The agent id, used only for diagnostic logging
+# + return - `()` if the name resolves and inputs are valid, otherwise the corresponding error
+isolated function validateToolNameAndInput(LlmToolResponse action, map<Tool> & readonly tool, string? agentId)
+        returns ToolNotFoundError|ToolInvalidInputError? {
     string toolName = action.name;
     map<json>? inputs = action.arguments;
-    string? agentId = agentCredential is Credential ? agentCredential.id : ();
     if !tool.hasKey(toolName) {
         log:printDebug("Tool not found",
             agentId = agentId,
@@ -403,16 +410,23 @@ isolated function validateTool(LlmToolResponse action, Credential? agentCredenti
         );
         string instruction = string `Tool "${toolName}"  execution failed due to invalid inputs provided.` +
             string ` Use the schema to provide inputs: ${tool.get(toolName).variables.toString()}`;
-        return error ToolInvalidInputError("Tool is provided with invalid inputs.", inputValues, 
+        return error ToolInvalidInputError("Tool is provided with invalid inputs.", inputValues,
             toolName = toolName, inputs = inputs ?: (), instruction = instruction);
     }
+}
+
+isolated function validateTool(LlmToolResponse action, Credential? agentCredential, cache:Cache tokenManager,
+    Context context, map<Tool> & readonly tool, boolean isMcpTool) returns
+    ToolNotFoundError|ToolInvalidInputError|TokenAcquisitionError|TokenValidationError? {
+    string toolName = action.name;
+    string? agentId = agentCredential is Credential ? agentCredential.id : ();
+    check validateToolNameAndInput(action, tool, agentId);
 
     check authorizeToolInvocation(agentCredential, tokenManager, context, tool, toolName);
-    
+
     log:printDebug("Executing tool",
         agentId = agentId,
-        toolName = toolName,
-        arguments = inputValues.keys()
+        toolName = toolName
     );
 }
 
