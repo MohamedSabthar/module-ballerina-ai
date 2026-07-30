@@ -378,15 +378,17 @@ isolated function mergeInputs(map<json>? inputs, map<json> constants) returns ma
     return inputs;
 }
 
-# Validates the tool name and merges/validates its inputs, without any side effects. Pure by
-# design so it can double as a "would this call pass validation?" probe (e.g. when deciding
-# whether a call should pause for human approval) without acquiring tokens or making network
-# calls. Authorization is intentionally left to `validateTool`.
+# Checks the tool name resolves and its inputs merge against the tool's constants, without any
+# side effects. Pure by design so it can double as a "would this call pass name/input
+# resolution?" probe (e.g. when deciding whether a call should pause for human approval) without
+# acquiring tokens or making network calls. Authorization is intentionally left to `validateTool`.
+# Note this does not perform full parameter-schema validation - that (and the actual constant
+# merge used for execution) happens on the execution path in `ToolStore.execute`.
 #
 # + action - The proposed tool call (name and arguments)
 # + tool - The available tools
 # + agentId - The agent id, used only for diagnostic logging
-# + return - `()` if the name resolves and inputs are valid, otherwise the corresponding error
+# + return - `()` if the name resolves and inputs merge, otherwise the corresponding error
 isolated function validateToolNameAndInput(LlmToolResponse action, map<Tool> & readonly tool, string? agentId)
         returns ToolNotFoundError|ToolInvalidInputError? {
     string toolName = action.name;
@@ -401,7 +403,10 @@ isolated function validateToolNameAndInput(LlmToolResponse action, map<Tool> & r
             instruction = string `Tool "${toolName}" does not exists.`
             + string ` Use a tool from the list: ${tool.keys().toString()}}`);
     }
-    map<json>|error inputValues = mergeInputs(inputs, tool.get(toolName).constants);
+    // `mergeInputs` mutates its input map in place; clone first so this probe never alters the
+    // caller's proposed arguments (they feed the approval request shown to the human and are
+    // re-merged independently at execution time).
+    map<json>|error inputValues = mergeInputs(inputs.clone(), tool.get(toolName).constants);
     if inputValues is error {
         log:printDebug("Tool input validation failed",
             inputValues,

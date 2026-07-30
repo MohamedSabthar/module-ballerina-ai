@@ -447,6 +447,12 @@ public isolated distinct class Agent {
         // check first, rather than let a new, unrelated turn interleave with an unresolved one.
         PendingApproval?|Error existingApprovalResult = self.checkpointer.getCheckpoint(sessionId);
         if existingApprovalResult is Error {
+            // Trace this earliest guard failure too, matching how `resumeInternal` opens its span
+            // before its own guards - otherwise a checkpoint-store failure here goes unobserved.
+            observe:InvokeAgentSpan errorSpan = observe:createInvokeAgentSpan(self.systemPrompt.role);
+            errorSpan.addId(self.uniqueId);
+            errorSpan.addSessionId(sessionId);
+            errorSpan.close(existingApprovalResult);
             return existingApprovalResult;
         }
         if existingApprovalResult is PendingApproval {
