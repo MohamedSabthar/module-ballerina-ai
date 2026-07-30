@@ -162,14 +162,18 @@ public type AgentMetadataConfig record {|
 # Callers decide whether they want the full `Trace`, the raw `string` answer, or the answer bound 
 # to a structured `anydata` type.
 public type DependentlyTypedAgent distinct isolated object {
-    # Executes the agent for the given query and binds the result to the inferred return type.
+    # Executes the agent for the given input and binds the result to the inferred return type.
     #
-    # + query - The query to be executed by the agent, as a plain string or a `Prompt` template
+    # Pass a `string`/`Prompt` to start a new turn, or a `Resume` (the human's decisions on a
+    # previously paused run) to continue a run that paused for human approval. The input type is
+    # what distinguishes the two - there is no separate resume operation.
+    #
+    # + input - A query to start a new turn (`string`/`Prompt`), or a `Resume` to continue a paused run
     # + sessionId - The ID associated with the agent memory
     # + context - The additional context that can be used during agent tool execution
     # + td - Type descriptor specifying the expected return type format
     # + return - The agent's response bound to `td`, or an `Error`
-    public isolated function run(@display {label: "Query"} string|Prompt query,
+    public isolated function run(@display {label: "Input"} string|Prompt|Resume input,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new,
             typedesc<Trace|anydata> td = <>) returns td|Error;
@@ -398,27 +402,37 @@ public isolated distinct class Agent {
             llmResponse = content);
     }
 
-    # Executes the agent for a given user query.
+    # Executes the agent for a given input.
     #
-    # **Note:** Calls to this function using the same session ID must be invoked sequentially by the caller, 
+    # Pass a `string`/`Prompt` to start a new turn, or a `Resume` (the human's decisions on a
+    # previously paused run) to continue a run that paused for human approval on this session. The
+    # input type is what distinguishes a fresh turn from a resume - there is no separate resume
+    # operation. A `Resume` for a session with no pending approval fails with `ApprovalNotFoundError`.
+    #
+    # **Note:** Calls to this function using the same session ID must be invoked sequentially by the caller,
     # as this operation is not thread-safe.
     #
-    # + query - The natural language input provided to the agent
+    # + input - A query to start a new turn (`string`/`Prompt`), or a `Resume` to continue a paused run
     # + sessionId - The ID associated with the agent memory
     # + context - The additional context that can be used during agent tool execution
     # + td - Type descriptor specifying the expected return type format
     # + return - The agent's response or an error
-    public isolated function run(@display {label: "Query"} string|Prompt query,
+    public isolated function run(@display {label: "Input"} string|Prompt|Resume input,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new,
             typedesc<Trace|anydata> td = <>) returns td|Error = @java:Method {
         'class: "io.ballerina.stdlib.ai.Agent"
     } external;
 
-    private isolated function runInternal(@display {label: "Query"} string|Prompt query,
+    private isolated function runInternal(@display {label: "Input"} string|Prompt|Resume input,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new, typedesc<Trace|anydata> td = string) returns Trace|anydata|Error {
-        boolean withTrace = td is typedesc<Trace>;
+        // A `Resume` input continues a run that paused for human approval instead of starting a
+        // new turn; the input type is the sole discriminator between the two.
+        if input is Resume {
+            return self.resumeInternal(sessionId, input.decisions, context, td);
+        }
+        string|Prompt query = input;
         // A prior call on this session may still be awaiting a human decision. Starting a
         // fresh run regardless would silently orphan that pending approval (and, if this new
         // run also happens to pause, `checkpointer.put` would overwrite it outright) - so
@@ -436,7 +450,7 @@ public isolated distinct class Agent {
                 }
                 // Fall through - proceed with a fresh run below.
             } else {
-                return self.buildPendingApprovalTrace(existingApprovalResult, withTrace);
+                return self.buildPendingApprovalTrace(existingApprovalResult, td);
             }
         }
 
@@ -473,85 +487,10 @@ public isolated distinct class Agent {
         ExecutionTrace executionTrace = run(self, systemPrompt, query, self.maxIter, self.verbose, agentId,
             sessionId, context, executionId, startTime, responseSchema);
         ChatUserMessage userMessage = {role: USER, content: query};
-        Iteration[] iterations = executionTrace.iterations;
-        FunctionCall[]? toolCalls = executionTrace.toolCalls.length() == 0 ? () : executionTrace.toolCalls;
-
-        ApprovalRequiredError? pendingApproval = executionTrace.pendingApproval;
-        if pendingApproval is ApprovalRequiredError {
-            log:printDebug("Agent execution paused pending human approval",
-                    executionId = executionId,
-                    agentId = self.agentId,
-                    sessionId = sessionId
-            );
-            span.close(pendingApproval);
-            if td is typedesc<Trace> {
-                return {
-                    id: executionId,
-                    userMessage,
-                    iterations,
-                    tools: self.toolSchemas,
-                    startTime,
-                    endTime: time:utcNow(),
-                    output: pendingApproval,
-                    toolCalls
-                };
-            }
-            return pendingApproval;
-        }
-
-        do {
-            string answer = check getAnswer(executionTrace);
-            log:printDebug("Agent execution completed successfully",
-                    executionId = executionId,
-                    agentId = self.agentId,
-                    steps = executionTrace.steps.toString(),
-                    answer = answer
-            );
-            span.addOutput(observe:TEXT, answer);
-            span.close();
-
-            if td is typedesc<Trace> {
-                return {
-                    id: executionId,
-                    userMessage,
-                    iterations,
-                    tools: self.toolSchemas,
-                    startTime,
-                    endTime: time:utcNow(),
-                    output: {role: ASSISTANT, content: answer},
-                    toolCalls
-                };
-            }
-            if td is typedesc<string> {
-                return answer;
-            }
-            if td is typedesc<anydata> {
-                return parseAnswerAsType(answer, td);
-            }
-            return answer;
-        } on fail Error err {
-            log:printDebug("Agent execution failed",
-                    err,
-                    executionId = executionId,
-                    agentId = self.agentId,
-                    steps = executionTrace.steps.toString()
-            );
-            span.close(err);
-
-            if td is typedesc<Trace> {
-                return {
-                    id: executionId,
-                    userMessage,
-                    iterations,
-                    tools: self.toolSchemas,
-                    startTime,
-                    endTime: time:utcNow(),
-                    output: err,
-                    toolCalls
-                };
-            }
-            return err;
-        }
+        return self.buildOutcome(executionId, userMessage, executionTrace, startTime, td, span, sessionId,
+            "Agent execution paused pending human approval",
+            "Agent execution completed successfully",
+            "Agent execution failed");
     }
 
     # Builds the `ApprovalRequiredError`/`Trace` for a still-live pending approval, without
@@ -560,13 +499,13 @@ public isolated distinct class Agent {
     # starting an unrelated turn that would orphan it.
     #
     # + pendingApproval - The still-live pending approval found for this session
-    # + withTrace - Whether to wrap the result in a `Trace`
-    # + return - The agent's response, wrapped in a `Trace` if `withTrace` is set, or an error
-    private isolated function buildPendingApprovalTrace(PendingApproval pendingApproval, boolean withTrace)
-            returns string|Trace|Error {
+    # + td - Type descriptor specifying the expected return type format
+    # + return - The agent's response bound to `td`, or an error
+    private isolated function buildPendingApprovalTrace(PendingApproval pendingApproval,
+            typedesc<Trace|anydata> td) returns Trace|anydata|Error {
         ApprovalRequiredError stillPending = error ApprovalRequiredError(
             string `${pendingApproval.pendingRequests.length()} tool call(s) are still awaiting approval for ` +
-                string `session '${pendingApproval.sessionId}'; call resume() before starting a new run.`,
+                string `session '${pendingApproval.sessionId}'; resume it (pass a Resume) before starting a new run.`,
             requests = pendingApproval.pendingRequests);
         // Safe: `isPendingApprovalHistoryValid` was already checked by the caller.
         ChatUserMessage userMessage =
@@ -581,33 +520,10 @@ public isolated distinct class Agent {
         span.addId(self.uniqueId);
         span.addSessionId(pendingApproval.sessionId);
         return self.buildOutcome(pendingApproval.executionId, userMessage, shortCircuitTrace,
-            pendingApproval.startTime, withTrace, span, pendingApproval.sessionId,
-            "Agent execution already has a pending approval; run() was called again before resume()",
+            pendingApproval.startTime, td, span, pendingApproval.sessionId,
+            "Agent execution already has a pending approval; a new run was started before it was resumed",
             "", "");
     }
-
-    # Resumes a run that paused for human approval on `sessionId`.
-    #
-    # `feedback` is a map of decisions keyed by each request's `ApprovalRequest.id` - always a
-    # map, even when only one call is pending, since there is no way to know in advance how many
-    # tool calls an LLM turn will propose or how many of them will need approval. A partial map
-    # (fewer entries than there are pending requests) is fine - whatever isn't supplied stays
-    # pending, and this call returns a fresh `ApprovalRequiredError` listing just the
-    # still-undecided requests.
-    #
-    # **Note:** like `run`, calls for the same session ID must be sequential.
-    #
-    # + sessionId - The ID associated with the agent memory
-    # + feedback - The human's decisions, keyed by `ApprovalRequest.id`
-    # + context - The additional context that can be used during agent tool execution
-    # + td - Type descriptor specifying the expected return type format
-    # + return - The agent's response or an error
-    public isolated function resume(@display {label: "Session ID"} string sessionId,
-            @display {label: "Human Response"} map<HumanResponse> feedback,
-            Context context = new,
-            typedesc<Trace|string> td = <>) returns td|Error = @java:Method {
-        'class: "io.ballerina.stdlib.ai.Agent"
-    } external;
 
     # Returns the approvals currently pending on `sessionId`, if any.
     #
@@ -624,15 +540,23 @@ public isolated distinct class Agent {
         return pendingApprovalResult.pendingRequests;
     }
 
+    # Continues a run that paused for human approval on `sessionId`, applying the supplied decisions.
+    # Reached from `run` when its input is a `Resume`; not a public entry point of its own.
+    #
+    # + sessionId - The ID associated with the agent memory
+    # + feedback - The human's decisions, keyed by `ApprovalRequest.id`
+    # + context - The additional context that can be used during agent tool execution
+    # + td - Type descriptor specifying the expected return type format
+    # + return - The agent's response bound to `td`, or an error
     private isolated function resumeInternal(string sessionId, map<HumanResponse> feedback,
-            Context context = new, boolean withTrace = false) returns string|Trace|Error {
+            Context context = new, typedesc<Trace|anydata> td = string) returns Trace|anydata|Error {
         log:printDebug("Agent resume started",
                 agentId = self.agentId,
                 sessionId = sessionId
         );
 
         // Claimed eagerly (removed from the store immediately, not just on resolution), so a
-        // concurrent duplicate `resume()` call for the same session finds nothing and fails
+        // concurrent duplicate resume for the same session finds nothing and fails
         // fast with `ApprovalNotFoundError` instead of also executing the approved tool call.
         // `executeAgentLoop`'s pause branch already unconditionally re-persists a fresh
         // `PendingApproval` if this call pauses again (e.g. another gate still undecided in the
@@ -680,7 +604,7 @@ public isolated distinct class Agent {
             self.verbose, agentId, sessionId, context);
         // Safe: `isPendingApprovalHistoryValid` above already guarantees this index is in range.
         ChatUserMessage userMessage = <ChatUserMessage>pendingApproval.history[pendingApproval.historyPrefixLength - 1];
-        return self.buildOutcome(executionId, userMessage, executionTrace, startTime, withTrace, span, sessionId,
+        return self.buildOutcome(executionId, userMessage, executionTrace, startTime, td, span, sessionId,
             "Agent execution paused again pending human approval",
             "Agent resume completed successfully",
             "Agent resume failed");
@@ -700,25 +624,27 @@ public isolated distinct class Agent {
         }
     }
 
-    # Shared by `runInternal`/`resumeInternal`: turns an `ExecutionTrace` into the agent's public
-    # `string|Trace|Error` result - a pause passthrough, a successful answer, or a failure - all
-    # three optionally wrapped in a `Trace` when the caller requested `withTrace`.
+    # Shared by both entry paths of `runInternal` (a fresh turn and a `Resume`): turns an
+    # `ExecutionTrace` into the agent's public result - a pause passthrough, a successful answer
+    # bound to `td`, or a failure - wrapped in a `Trace` when `td` is `Trace`, otherwise bound to
+    # `td` (a `string`, or a concrete `anydata` type parsed from the structured answer).
     #
     # + executionId - Identifier of the logical execution this outcome belongs to
     # + userMessage - The turn's user message, for the returned `Trace`
     # + executionTrace - The trace produced by `run`/`resumeRun` for this call
     # + startTime - The logical run's start time, for the returned `Trace`
-    # + withTrace - Whether to wrap the result in a `Trace`
+    # + td - Type descriptor specifying the expected return type format
     # + span - Observability span for this call, closed with the outcome
     # + sessionId - The ID associated with the agent memory
     # + pauseLogMessage - Message logged when the execution paused for human approval
     # + successLogMessage - Message logged when the execution completed successfully
     # + failedLogMessage - Message logged when the execution failed
-    # + return - The agent's response, wrapped in a `Trace` if `withTrace` is set, or an error
+    # + return - The agent's response bound to `td`, or an error
     private isolated function buildOutcome(string executionId, ChatUserMessage userMessage,
-            ExecutionTrace executionTrace, time:Utc startTime, boolean withTrace, observe:InvokeAgentSpan span,
-            string sessionId, string pauseLogMessage, string successLogMessage,
-            string failedLogMessage) returns string|Trace|Error {
+            ExecutionTrace executionTrace, time:Utc startTime, typedesc<Trace|anydata> td,
+            observe:InvokeAgentSpan span, string sessionId, string pauseLogMessage, string successLogMessage,
+            string failedLogMessage) returns Trace|anydata|Error {
+        boolean withTrace = td is typedesc<Trace>;
         Iteration[] iterations = executionTrace.iterations;
         FunctionCall[]? toolCalls = executionTrace.toolCalls.length() == 0 ? () : executionTrace.toolCalls;
 
@@ -755,8 +681,8 @@ public isolated distinct class Agent {
             span.addOutput(observe:TEXT, answer);
             span.close();
 
-            return withTrace
-                ? {
+            if td is typedesc<Trace> {
+                return {
                     id: executionId,
                     userMessage,
                     iterations,
@@ -765,8 +691,15 @@ public isolated distinct class Agent {
                     endTime: time:utcNow(),
                     output: {role: ASSISTANT, content: answer},
                     toolCalls
-                }
-                : answer;
+                };
+            }
+            if td is typedesc<string> {
+                return answer;
+            }
+            if td is typedesc<anydata> {
+                return parseAnswerAsType(answer, td);
+            }
+            return answer;
         } on fail Error err {
             log:printDebug(failedLogMessage,
                     err,

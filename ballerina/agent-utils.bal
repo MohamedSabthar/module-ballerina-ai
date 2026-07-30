@@ -746,8 +746,12 @@ isolated function resumeRun(Agent agent, PendingApproval pendingApproval, map<Hu
     // The whole logical run's budget minus what earlier calls already consumed - see
     // `Executor.getIterationsConsumed()`.
     int remainingBudget = int:max(0, maxIter - pendingApproval.iterationsUsed);
+    // Carry the structured-output schema captured at pause forward, so the resumed run keeps
+    // exposing the same final-answer tool and binds its answer to the same type. The system
+    // message that instructs the model to use it is already in the persisted `history`.
     Executor executor = new (agent, sessionId, remainingBudget, seededFeedback = seeded,
-        progress = {instruction: "", query: "", context, executionId, history});
+        progress = {instruction: "", query: "", context, executionId, history,
+            responseSchema: pendingApproval.responseSchema});
     return executeAgentLoop(agent, executor, history, historyPrefixLength, verbose, agentId, executionId,
         sessionId, pendingApproval.iterationsUsed, pendingApproval.iterations, pendingApproval.toolCalls,
         pendingApproval.startTime, "Agent execution paused again for human approval");
@@ -860,7 +864,8 @@ isolated function executeAgentLoop(Agent agent, Executor executor, ChatMessage[]
                 startTime: originalStartTime,
                 originalBatch: pendingOriginalBatch,
                 pendingRequests: pendingApproval.detail().requests,
-                decisions: pendingDecisions
+                decisions: pendingDecisions,
+                responseSchema: executor.progress.responseSchema
             };
             Error? putErr = agent.checkpointer.putCheckpoint(pendingApprovalRecord);
             if putErr is Error {

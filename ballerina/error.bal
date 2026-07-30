@@ -100,9 +100,9 @@ public type MemoryError distinct Error;
 # the LLM proposed several gated calls together and none of them have a decision yet.
 public type ApprovalRequiredError distinct (Error & error<record {| ApprovalRequest[] requests; |}>);
 
-# Raised on `resume` when no approval is pending for the session.
+# Raised when `run` is given a `Resume` but no approval is pending for the session.
 public type ApprovalNotFoundError distinct Error;
 
-# Raised on `resume` when a `map<HumanResponse>` names an id that is not among the approvals
-# currently pending for the session (a stale id, a typo, or an id from a different session).
+# Raised when a `Resume` passed to `run` names an id that is not among the approvals currently
+# pending for the session (a stale id, a typo, or an id from a different session).
 public type UnknownApprovalIdError distinct Error;
