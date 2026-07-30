@@ -82,14 +82,14 @@ public type ToolOutput record {|
 |};
 
 # A previously proposed batch of tool calls, one or more of which are still awaiting a human
-# decision. When set, the next step applies the caller's `resume()` decisions to whichever
+# decision. When set, the next step applies the caller's resume decisions to whichever
 # positions they target (and continues gathering decisions for, or executing, the rest of the
 # same batch) instead of reasoning with the LLM.
 type SeededFeedback record {|
-    # The caller's `resume()` decisions, keyed by `ApprovalRequest.id`. Already validated (in
+    # The caller's resume decisions, keyed by `ApprovalRequest.id`. Already validated (in
     # `Agent.resumeInternal`) to reference only ids present in `pendingRequests`.
     map<HumanResponse> suppliedDecisions;
-    # The requests still awaiting a decision immediately before this `resume()` call
+    # The requests still awaiting a decision immediately before this resume call
     ApprovalRequest[] pendingRequests;
     # The full batch of tool calls the LLM proposed in this turn
     FunctionCall[] originalBatch;
@@ -275,7 +275,7 @@ class Executor {
     # about whichever gated calls in the same original batch are still undecided or - once every
     # gated call has a decision - executes the whole batch.
     #
-    # + seeded - The decisions just supplied to `resume()`, and the batch state they apply to
+    # + seeded - The decisions just supplied to resume, and the batch state they apply to
     # + return - Results of every executed call, or a further pause on the calls still undecided
     private isolated function resolveSuppliedDecisionsAndContinue(SeededFeedback seeded)
             returns (ExecutionResult|ExecutionError)[]|BatchApprovalPending {
@@ -285,7 +285,7 @@ class Executor {
                 seeded.originalBatch, decisions);
         if gatedIndices.length() > 0 {
             // Every position still gated here was already surfaced in `seeded.pendingRequests`
-            // (a partial `resume()` can only ever shrink the gated set, never grow it), so its
+            // (a partial resume can only ever shrink the gated set, never grow it), so its
             // `ApprovalRequest` - id included - is reused unchanged rather than re-minted. A
             // caller that already saw one of these ids (displayed it, logged it) must still be
             // able to use it after a sibling call in the same batch gets decided.
@@ -589,19 +589,18 @@ isolated function buildApprovalRequest(Agent agent, FunctionCall call, string se
         toolDescription: toolDescription ?: "",
         arguments: call.arguments ?: {},
         toolCallId: call.id,
-        requestedAt: time:utcNow(),
         batchIndex
     };
 }
 
-# Merges the caller's `resume()` decisions into `decisions`, applying each supplied decision at
+# Merges the caller's resume decisions into `decisions`, applying each supplied decision at
 # the `batchIndex` of the request it targets. Callers must have already validated that every
 # key in `suppliedDecisions` matches a `pendingRequests` id (see `findUnknownApprovalIds`); this
 # function assumes that's already true and simply ignores any decision that doesn't match.
 #
 # + pendingRequests - The requests still awaiting a decision immediately before this call
 # + decisions - Decisions already gathered for positions other than those in `pendingRequests`
-# + suppliedDecisions - The caller's decisions for this `resume()` call, keyed by `ApprovalRequest.id`
+# + suppliedDecisions - The caller's decisions for this resume call, keyed by `ApprovalRequest.id`
 # + return - `decisions`, with `suppliedDecisions` applied at the right positions
 isolated function applySuppliedDecisions(ApprovalRequest[] pendingRequests, HumanResponse?[] decisions,
         map<HumanResponse> suppliedDecisions) returns HumanResponse?[] {
@@ -616,10 +615,10 @@ isolated function applySuppliedDecisions(ApprovalRequest[] pendingRequests, Huma
 }
 
 # The previously issued `ApprovalRequest` for `batchIndex`, if `pendingRequests` has one. Used
-# to keep a request's `id` (and `requestedAt`) stable across a re-pause instead of minting a new
+# to keep a request's `id` stable across a re-pause instead of minting a new
 # one for a call that was already surfaced to the caller.
 #
-# + pendingRequests - The requests surfaced before this `resume()` call
+# + pendingRequests - The requests surfaced before this resume call
 # + batchIndex - The batch position to look up
 # + return - The matching request, or `()` if `batchIndex` wasn't among `pendingRequests`
 isolated function findPendingRequestForIndex(ApprovalRequest[] pendingRequests, int batchIndex)
@@ -633,10 +632,10 @@ isolated function findPendingRequestForIndex(ApprovalRequest[] pendingRequests, 
 }
 
 # Every id in `suppliedDecisions` that doesn't match any request still pending, used by
-# `Agent.resumeInternal` to reject a `resume()` call that targets a stale or mistyped id before
+# `Agent.resumeInternal` to reject a resume call that targets a stale or mistyped id before
 # any state changes.
 #
-# + suppliedDecisions - The caller's decisions for a `resume()` call, keyed by `ApprovalRequest.id`
+# + suppliedDecisions - The caller's decisions for a resume call, keyed by `ApprovalRequest.id`
 # + pendingRequests - The requests currently awaiting a decision
 # + return - The ids in `suppliedDecisions` that don't match any entry in `pendingRequests`
 isolated function findUnknownApprovalIds(map<HumanResponse> suppliedDecisions, ApprovalRequest[] pendingRequests)
@@ -715,7 +714,7 @@ isolated function run(Agent agent, string instruction, string|Prompt query, int 
 #
 # + agent - Agent to be executed
 # + pendingApproval - The persisted state of the paused execution
-# + suppliedDecisions - The human's decisions for this `resume()` call, keyed by `ApprovalRequest.id`
+# + suppliedDecisions - The human's decisions for this resume call, keyed by `ApprovalRequest.id`
 # + maxIter - No. of max iterations that agent will run to execute the task
 # + verbose - If true, then print the reasoning steps
 # + agentId - Optional agent identity

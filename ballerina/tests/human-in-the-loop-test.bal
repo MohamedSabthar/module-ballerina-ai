@@ -691,7 +691,6 @@ isolated class FixedCheckpointStore {
                 toolName: "issueRefund",
                 toolDescription: "Issues a refund for an order",
                 arguments: {"orderId": "ORD-1", "amount": 50},
-                requestedAt: time:utcNow(),
                 batchIndex: 0
             }
         ],
@@ -808,9 +807,9 @@ function testResumeClaimsApprovalPreventingDoubleExecution() returns error? {
         test:assertTrue(firstResume.includes("Refunded 50.0 for ORD-1"), firstResume);
     }
 
-    // A second resume() for the same, already-claimed-and-resolved session must NOT
+    // A second resume for the same, already-claimed-and-resolved session must NOT
     // re-execute the tool - the approval was claimed (removed) exactly once, atomically,
-    // by the first resume() call, before the tool ever ran. Reusing the same (now-stale) id
+    // by the first resume call, before the tool ever ran. Reusing the same (now-stale) id
     // is fine for this assertion: nothing is pending anymore regardless of which id is named.
     string|Error secondResume = result is ApprovalRequiredError
         ? agent.run(singleResume(result, {decision: APPROVE}), sessionId)

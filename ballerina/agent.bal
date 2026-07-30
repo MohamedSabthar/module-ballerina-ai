@@ -610,8 +610,8 @@ public isolated distinct class Agent {
             "Agent resume failed");
     }
 
-    # Re-persists a `PendingApproval` claimed by `take()` when a `resume()` call names an unknown
-    # id before anything was actually resolved, so the caller can simply retry `resume()` with a
+    # Re-persists a `PendingApproval` claimed by `take()` when a resume call names an unknown
+    # id before anything was actually resolved, so the caller can simply retry resume with a
     # corrected decision instead of losing the pause.
     #
     # + pendingApproval - The claimed pending approval to restore, unchanged
@@ -619,7 +619,7 @@ public isolated distinct class Agent {
     private isolated function restoreClaimedApproval(PendingApproval pendingApproval, string sessionId) {
         Error? restoreErr = self.checkpointer.putCheckpoint(pendingApproval);
         if restoreErr is Error {
-            log:printError("Failed to restore the claimed pending approval after an invalid resume() call",
+            log:printError("Failed to restore the claimed pending approval after an invalid resume call",
                     restoreErr, sessionId = sessionId);
         }
     }

@@ -30,10 +30,8 @@ public type ApprovalRequest record {|
     map<json> arguments;
     # Identifier of the underlying tool call, used for message threading
     string toolCallId?;
-    # The time at which the approval was requested
-    time:Utc requestedAt;
     # Position of this call within the batch the LLM proposed in this turn. Used to apply a
-    # `resume()` decision back to the right call, and useful for display ("2 of 3 pending").
+    # resume decision back to the right call, and useful for display ("2 of 3 pending").
     int batchIndex;
 |};
 

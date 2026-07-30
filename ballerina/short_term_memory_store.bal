@@ -107,7 +107,7 @@ public type ShortTermMemoryStore isolated object {
     public isolated function removeCheckpoint(string sessionId) returns Error?;
 
     # Atomically fetches and removes the pending human-in-the-loop approval for a session, if
-    # any. Used to "claim" an approval before resolving it, so a concurrent duplicate `resume()`
+    # any. Used to "claim" an approval before resolving it, so a concurrent duplicate resume
     # call for the same session cannot also claim and execute the same approved tool call.
     #
     # + sessionId - The session to claim
