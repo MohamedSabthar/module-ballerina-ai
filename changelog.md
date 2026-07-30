@@ -15,6 +15,9 @@ This file documents all significant changes made to the Ballerina AI package acr
 ### Updated
 - [Execute Multiple Tool Calls Returned in a Single LLM Response Together](https://github.com/wso2/product-integrator/issues/1833)
 
+### Changed
+- **Breaking:** `ShortTermMemoryStore` now requires four checkpoint methods (`putCheckpoint`, `getCheckpoint`, `removeCheckpoint`, and `takeCheckpoint`) to support Human-in-the-Loop pauses. Existing custom `ShortTermMemoryStore` implementations must add these methods to keep conforming. ([#148](https://github.com/ballerina-platform/module-ballerina-ai/pull/148))
+
 ## [1.11.1] - 2026-04-16
 
 ### Fixed

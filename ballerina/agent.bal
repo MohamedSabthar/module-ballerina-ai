@@ -684,7 +684,20 @@ public isolated distinct class Agent {
                     sessionId = sessionId
             );
             span.close(fatalError);
-            return fatalError;
+            // Mirror the withTrace wrapping used by the other failure branches, so a caller
+            // requesting a `Trace` still gets the iteration/tool-call context on a fatal failure.
+            return withTrace
+                ? {
+                    id: executionId,
+                    userMessage,
+                    iterations,
+                    tools: self.toolSchemas,
+                    startTime,
+                    endTime: time:utcNow(),
+                    output: fatalError,
+                    toolCalls
+                }
+                : fatalError;
         }
 
         ApprovalRequiredError? pendingApproval = executionTrace.pendingApproval;
