@@ -450,7 +450,7 @@ public isolated distinct class Agent {
                 }
                 // Fall through - proceed with a fresh run below.
             } else {
-                return self.buildPendingApprovalTrace(existingApprovalResult, td);
+                return self.buildPendingApprovalTrace(existingApprovalResult, td, toString(query));
             }
         }
 
@@ -500,9 +500,11 @@ public isolated distinct class Agent {
     #
     # + pendingApproval - The still-live pending approval found for this session
     # + td - Type descriptor specifying the expected return type format
+    # + attemptedQuery - The new query that was rejected because a pause is still outstanding,
+    #                    recorded on the span so the short-circuited attempt is visible in the trace
     # + return - The agent's response bound to `td`, or an error
     private isolated function buildPendingApprovalTrace(PendingApproval pendingApproval,
-            typedesc<Trace|anydata> td) returns Trace|anydata|Error {
+            typedesc<Trace|anydata> td, string attemptedQuery) returns Trace|anydata|Error {
         ApprovalRequiredError stillPending = error ApprovalRequiredError(
             string `${pendingApproval.pendingRequests.length()} tool call(s) are still awaiting approval for ` +
                 string `session '${pendingApproval.sessionId}'; resume it (pass a Resume) before starting a new run.`,
@@ -519,6 +521,7 @@ public isolated distinct class Agent {
         observe:InvokeAgentSpan span = observe:createInvokeAgentSpan(self.systemPrompt.role);
         span.addId(self.uniqueId);
         span.addSessionId(pendingApproval.sessionId);
+        span.addInput(attemptedQuery);
         return self.buildOutcome(pendingApproval.executionId, userMessage, shortCircuitTrace,
             pendingApproval.startTime, td, span, pendingApproval.sessionId,
             "Agent execution already has a pending approval; a new run was started before it was resumed",
@@ -555,6 +558,16 @@ public isolated distinct class Agent {
                 sessionId = sessionId
         );
 
+        // Opened before the guard checks below so a rejected resume (no pending approval, corrupted
+        // state, unknown id) still produces one errored span, matching how the fresh-run path traces
+        // its own early failures (e.g. a bad `td` schema).
+        observe:InvokeAgentSpan span = observe:createInvokeAgentSpan(self.systemPrompt.role);
+        span.addId(self.uniqueId);
+        span.addSessionId(sessionId);
+        // A resume has no query; its input is the human's decisions. Recorded before the guards
+        // so even a rejected resume's span shows which decisions were attempted.
+        span.addInput(string `resume decisions: ${feedback.toJsonString()}`);
+
         // Claimed eagerly (removed from the store immediately, not just on resolution), so a
         // concurrent duplicate resume for the same session finds nothing and fails
         // fast with `ApprovalNotFoundError` instead of also executing the approved tool call.
@@ -563,10 +576,14 @@ public isolated distinct class Agent {
         // same batch), so claiming here composes correctly with that existing flow.
         PendingApproval?|Error pendingApprovalResult = self.checkpointer.takeCheckpoint(sessionId);
         if pendingApprovalResult is Error {
+            span.close(pendingApprovalResult);
             return pendingApprovalResult;
         }
         if pendingApprovalResult is () {
-            return error ApprovalNotFoundError("No pending approval found for session '" + sessionId + "'.");
+            ApprovalNotFoundError notFound =
+                error ApprovalNotFoundError("No pending approval found for session '" + sessionId + "'.");
+            span.close(notFound);
+            return notFound;
         }
         PendingApproval pendingApproval = pendingApprovalResult;
         if !isPendingApprovalHistoryValid(pendingApproval) {
@@ -575,9 +592,12 @@ public isolated distinct class Agent {
                     historyLength = pendingApproval.history.length(),
                     historyPrefixLength = pendingApproval.historyPrefixLength
             );
-            return error Error("The pending approval for session '" + sessionId + "' has a corrupted history " +
+            Error corrupted =
+                error Error("The pending approval for session '" + sessionId + "' has a corrupted history " +
                     "snapshot and cannot be resumed. This should never happen with the built-in " +
                     "`ShortTermMemory`; check any custom `ShortTermMemoryStore` implementation in use.");
+            span.close(corrupted);
+            return corrupted;
         }
 
         // Not the claimed record's fault - nothing was actually resolved - so restore it
@@ -585,18 +605,17 @@ public isolated distinct class Agent {
         string[] unknownIds = findUnknownApprovalIds(feedback, pendingApproval.pendingRequests);
         if unknownIds.length() > 0 {
             self.restoreClaimedApproval(pendingApproval, sessionId);
-            return error UnknownApprovalIdError(
+            UnknownApprovalIdError unknown = error UnknownApprovalIdError(
                     string `The following ids are not currently pending for session '${sessionId}': ` +
                         unknownIds.toString());
+            span.close(unknown);
+            return unknown;
         }
 
         // Carry the original run's start time forward, so `Trace.startTime` reflects the
         // whole logical run rather than just this resume call.
         time:Utc startTime = pendingApproval.startTime;
         string executionId = pendingApproval.executionId;
-        observe:InvokeAgentSpan span = observe:createInvokeAgentSpan(self.systemPrompt.role);
-        span.addId(self.uniqueId);
-        span.addSessionId(sessionId);
 
         Credential? & readonly agentCredential = self.agentCredential;
         string? agentId = agentCredential is Credential ? agentCredential.id : ();
@@ -655,7 +674,16 @@ public isolated distinct class Agent {
                     agentId = self.agentId,
                     sessionId = sessionId
             );
-            span.close(pendingApproval);
+            // A pause for human approval is normal control flow, not a failure - closing the span
+            // with the `ApprovalRequiredError` would mark it as errored and pollute error metrics.
+            // Record what it paused on as a structured output and close the span successfully.
+            ApprovalRequest[] requests = pendingApproval.detail().requests;
+            span.addOutput(observe:JSON, {
+                status: "approval_required",
+                pendingCount: requests.length(),
+                tools: from ApprovalRequest req in requests select req.toolName
+            });
+            span.close();
             return withTrace
                 ? {
                     id: executionId,
