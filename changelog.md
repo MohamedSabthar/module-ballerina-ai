@@ -5,6 +5,7 @@ This file documents all significant changes made to the Ballerina AI package acr
 ## [Unreleased]
 
 ### Added
+- [Add Human-in-the-Loop Support to Pause the Agent for Approval Before Executing Sensitive Tools](https://github.com/ballerina-platform/module-ballerina-ai/pull/148)
 - [Add Agent Configuration to Execute Tool Calls in Parallel](https://github.com/wso2/product-integrator/issues/1856)
 
 ### Fixed
