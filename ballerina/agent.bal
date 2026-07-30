@@ -627,6 +627,14 @@ public isolated distinct class Agent {
             return unknown;
         }
 
+        // Emit a dedicated child span so the human's decisions are visible as their own node in
+        // the trace, making it clear at a glance where and how a human intervened on resume.
+        observe:ResolveHumanApprovalSpan resolveSpan = observe:createResolveHumanApprovalSpan(sessionId);
+        resolveSpan.addDecisions(from ApprovalRequest req in pendingApproval.pendingRequests
+            where feedback.hasKey(req.id)
+            select {id: req.id, toolName: req.toolName, decision: feedback.get(req.id).decision});
+        resolveSpan.close();
+
         // Carry the original run's start time forward, so `Trace.startTime` reflects the
         // whole logical run rather than just this resume call.
         time:Utc startTime = pendingApproval.startTime;
@@ -722,6 +730,13 @@ public isolated distinct class Agent {
                 pendingCount: requests.length(),
                 tools: from ApprovalRequest req in requests select req.toolName
             });
+            // Emit a dedicated child span so the pause is visible as its own node in the trace,
+            // making it clear at a glance where the run stopped to wait for a human.
+            observe:RequestHumanApprovalSpan approvalSpan = observe:createRequestHumanApprovalSpan(sessionId);
+            approvalSpan.addPendingCount(requests.length());
+            approvalSpan.addRequests(from ApprovalRequest req in requests
+                select {id: req.id, toolName: req.toolName, arguments: req.arguments, batchIndex: req.batchIndex});
+            approvalSpan.close();
             span.close();
             return withTrace
                 ? {
