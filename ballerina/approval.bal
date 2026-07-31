@@ -122,10 +122,6 @@ public type PendingApproval record {|
     # One slot per entry in `originalBatch`: `()` if not yet decided (or not gated at all),
     # otherwise the human's decision already gathered for that position
     HumanResponse?[] decisions = [];
-    # The structured-output schema in effect when the run paused, if the original `run` requested a
-    # structured answer (`td` a concrete `anydata` type). Persisted so the resumed run keeps exposing
-    # the same final-answer tool and binds its answer to the same type.
-    ResponseSchema? responseSchema = ();
 |};
 
 # The isolated-safe form of an `Iteration` used only by `InMemoryShortTermMemoryStore`'s
@@ -239,9 +235,6 @@ type StoredPendingApproval record {|
     ApprovalRequest[] pendingRequests;
     # One slot per entry in `originalBatch`: `()` if not yet decided, otherwise the human's decision
     HumanResponse?[] decisions;
-    # The structured-output schema in effect when the run paused (see `PendingApproval`). Plain
-    # isolated data (`map<json>` plus a `boolean`), so it crosses the `lock` boundary unchanged.
-    ResponseSchema? responseSchema;
 |};
 
 # Converts a `PendingApproval` into its isolated-safe stored form for persistence inside a
@@ -263,8 +256,7 @@ isolated function toStoredPendingApproval(PendingApproval approval) returns Stor
         startTime: approval.startTime,
         originalBatch: approval.originalBatch,
         pendingRequests: approval.pendingRequests,
-        decisions: approval.decisions,
-        responseSchema: approval.responseSchema
+        decisions: approval.decisions
     };
 }
 
@@ -279,8 +271,7 @@ isolated function fromStoredPendingApproval(StoredPendingApproval stored) return
     startTime: stored.startTime,
     originalBatch: stored.originalBatch,
     pendingRequests: stored.pendingRequests,
-    decisions: stored.decisions,
-    responseSchema: stored.responseSchema
+    decisions: stored.decisions
 };
 
 # Human-in-the-loop configuration for an agent.

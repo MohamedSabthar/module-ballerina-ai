@@ -723,9 +723,11 @@ isolated function run(Agent agent, string instruction, string|Prompt query, int 
 # + agentId - Optional agent identity
 # + sessionId - The ID associated with the memory
 # + context - Context values to be used by the agent to execute the task
+# + responseSchema - Structured-output schema for this resume, derived from the caller's `td`
 # + return - Returns the execution steps tracing the agent's reasoning and outputs from the tools
 isolated function resumeRun(Agent agent, PendingApproval pendingApproval, map<HumanResponse> suppliedDecisions,
-        int maxIter, boolean verbose, string? agentId, string sessionId = DEFAULT_SESSION_ID, Context context = new)
+        int maxIter, boolean verbose, string? agentId, string sessionId = DEFAULT_SESSION_ID, Context context = new,
+        ResponseSchema? responseSchema = ())
         returns ExecutionTrace {
     string executionId = pendingApproval.executionId;
     log:printDebug("Agent resume loop started",
@@ -748,12 +750,11 @@ isolated function resumeRun(Agent agent, PendingApproval pendingApproval, map<Hu
     // The whole logical run's budget minus what earlier calls already consumed - see
     // `Executor.getIterationsConsumed()`.
     int remainingBudget = int:max(0, maxIter - pendingApproval.iterationsUsed);
-    // Carry the structured-output schema captured at pause forward, so the resumed run keeps
-    // exposing the same final-answer tool and binds its answer to the same type. The system
-    // message that instructs the model to use it is already in the persisted `history`.
+    // The structured-output schema is re-derived from the caller's `td` on resume (not persisted),
+    // so the resumed run exposes the same final-answer tool and binds its answer to that type. The
+    // system message that instructs the model to use it is already in the persisted `history`.
     Executor executor = new (agent, sessionId, remainingBudget, seededFeedback = seeded,
-        progress = {instruction: "", query: "", context, executionId, history,
-            responseSchema: pendingApproval.responseSchema});
+        progress = {instruction: "", query: "", context, executionId, history, responseSchema});
     return executeAgentLoop(agent, executor, history, historyPrefixLength, verbose, agentId, executionId,
         sessionId, pendingApproval.iterationsUsed, pendingApproval.iterations, pendingApproval.toolCalls,
         pendingApproval.startTime, "Agent execution paused again for human approval");
@@ -866,8 +867,7 @@ isolated function executeAgentLoop(Agent agent, Executor executor, ChatMessage[]
                 startTime: originalStartTime,
                 originalBatch: pendingOriginalBatch,
                 pendingRequests: pendingApproval.detail().requests,
-                decisions: pendingDecisions,
-                responseSchema: executor.progress.responseSchema
+                decisions: pendingDecisions
             };
             Error? putErr = agent.checkpointer.putCheckpoint(pendingApprovalRecord);
             if putErr is Error {

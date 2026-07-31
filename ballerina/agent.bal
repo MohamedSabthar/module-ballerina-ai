@@ -642,8 +642,21 @@ public isolated distinct class Agent {
 
         Credential? & readonly agentCredential = self.agentCredential;
         string? agentId = agentCredential is Credential ? agentCredential.id : ();
+        // Re-derive the structured-output schema from the caller's `td` rather than persisting it
+        // in the checkpoint. `td` is the authoritative return type on resume (it's what the final
+        // answer binds to), and the instruction telling the model to use the tool is already in the
+        // persisted history, so deriving here reproduces the same tool the original run exposed.
+        ResponseSchema? responseSchema = ();
+        if td !is typedesc<string|Trace> && td is typedesc<anydata> {
+            ResponseSchema|Error schema = getResponseSchemaForType(td);
+            if schema is Error {
+                span.close(schema);
+                return schema;
+            }
+            responseSchema = schema;
+        }
         ExecutionTrace executionTrace = resumeRun(self, pendingApproval, feedback, self.maxIter,
-            self.verbose, agentId, sessionId, context);
+            self.verbose, agentId, sessionId, context, responseSchema);
         // Safe: `isPendingApprovalHistoryValid` above already guarantees this index is in range.
         ChatUserMessage userMessage = <ChatUserMessage>pendingApproval.history[pendingApproval.historyPrefixLength - 1];
         return self.buildOutcome(executionId, userMessage, executionTrace, startTime, td, span, sessionId,

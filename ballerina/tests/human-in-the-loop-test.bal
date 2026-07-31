@@ -115,6 +115,64 @@ function testHumanInTheLoopApprove() returns error? {
     test:assertEquals(pending, ());
 }
 
+// Proposes the gated `issueRefund` on the first turn, then delivers its final answer through the
+// structured-output tool once an observation is present (i.e. after the human approved on resume).
+// Uses a simple `int` result so the schema can be generated at runtime in tests (record schemas
+// need the compiler plugin); this still drives the structured-output code path end to end.
+public isolated client class HitlStructuredMockLLM {
+    *ModelProvider;
+
+    isolated remote function chat(ChatMessage[]|ChatUserMessage messages, ChatCompletionFunctions[] tools = [],
+            string? stop = ()) returns ChatAssistantMessage|Error {
+        ChatMessage[] msgs;
+        if messages is ChatUserMessage {
+            msgs = [messages];
+        } else {
+            msgs = messages;
+        }
+        ChatMessage lastMessage = msgs[msgs.length() - 1];
+        if lastMessage is ChatFunctionMessage {
+            return {
+                role: ASSISTANT,
+                toolCalls: [{name: STRUCTURED_OUTPUT_TOOL, arguments: {"result": 50}, id: "final-1"}]
+            };
+        }
+        return {
+            role: ASSISTANT,
+            toolCalls: [{name: "issueRefund", arguments: {"orderId": "ORD-1", "amount": 50}, id: "call-1"}]
+        };
+    }
+
+    isolated remote function generate(Prompt prompt, typedesc<anydata> td = <>) returns td|Error = @java:Method {
+        'class: "io.ballerina.lib.ai.MockGenerator"
+    } external;
+}
+
+@test:Config
+function testHumanInTheLoopStructuredOutputBindsAcrossResume() returns error? {
+    Agent agent = check new ({
+        systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
+        model: new HitlStructuredMockLLM(),
+        tools: [hitlRefundTool]
+    });
+    string sessionId = "hitl-structured-resume-session";
+
+    // Fresh run requests a structured (`int`) answer; the gated refund makes it pause.
+    int|Error result = agent.run("Refund order ORD-1", sessionId);
+    test:assertTrue(result is ApprovalRequiredError, result is Error ? result.message() : "");
+
+    // Resume with the same `td`. The structured-output schema is re-derived from `td` (no longer
+    // persisted in the checkpoint), so the resumed run must still expose the structured-output tool
+    // and bind the final answer to the expected type.
+    if result is ApprovalRequiredError {
+        int|Error resumed = agent.run(singleResume(result, {decision: APPROVE}), sessionId);
+        test:assertTrue(resumed is int, resumed is Error ? resumed.message() : "");
+        if resumed is int {
+            test:assertEquals(resumed, 50);
+        }
+    }
+}
+
 @test:Config
 function testHumanInTheLoopRejectDoesNotExecuteTheTool() returns error? {
     Agent agent = check newHitlTestAgent();
