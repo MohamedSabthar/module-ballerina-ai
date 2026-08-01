@@ -15,7 +15,6 @@
 // under the License.
 
 import ballerina/jballerina.java;
-import ballerina/mcp;
 import ballerina/test;
 import ballerina/time;
 
@@ -525,11 +524,25 @@ function testHumanInTheLoopPartialBulkResumeLeavesRestPending() returns error? {
 @test:Config
 function testHumanInTheLoopPreservesParallelismForSafeCallsInGatedBatch() returns error? {
     MultiToolCallMockLLM scriptedModel = new;
+    // Gate Search + Calculator via their own `ToolConfig.requiresApproval`.
+    ToolConfig gatedSearch = {
+        name: slowSearchTool.name,
+        description: slowSearchTool.description,
+        parameters: slowSearchTool.parameters,
+        caller: slowSearchTool.caller,
+        requiresApproval: true
+    };
+    ToolConfig gatedCalculator = {
+        name: slowCalculatorTool.name,
+        description: slowCalculatorTool.description,
+        parameters: slowCalculatorTool.parameters,
+        caller: slowCalculatorTool.caller,
+        requiresApproval: true
+    };
     Agent agent = check new ({
         systemPrompt: {role: "Test Agent", instructions: "Answer the questions"},
         model: scriptedModel,
-        tools: [slowSearchTool, slowCalculatorTool, hitlRefundTool],
-        approval: {tools: ["Search", "Calculator"]}
+        tools: [gatedSearch, gatedCalculator, hitlRefundTool]
     });
     string sessionId = "hitl-parallel-preserved-session";
 
@@ -564,53 +577,6 @@ function testHumanInTheLoopPreservesParallelismForSafeCallsInGatedBatch() return
     test:assertTrue(searchWindow[0] < calculatorWindow[1] && calculatorWindow[0] < searchWindow[1],
             string `Expected tool executions to overlap, but Search ran during ${searchWindow.toString()} ` +
             string `and Calculator ran during ${calculatorWindow.toString()}`);
-}
-
-// Proposes [lookupOrder, nonExistentTool] together; "nonExistentTool" is listed in
-// `approval.tools` (so it looks gated by name) but isn't a registered tool at all.
-public isolated client class HitlInvalidGateNameMockLLM {
-    *ModelProvider;
-
-    isolated remote function chat(ChatMessage[]|ChatUserMessage messages, ChatCompletionFunctions[] tools = [],
-            string? stop = ()) returns ChatAssistantMessage|Error {
-        int functionMessageCount = messages is ChatUserMessage ? 0
-            : messages.filter(msg => msg is ChatFunctionMessage).length();
-        if functionMessageCount == 0 {
-            return {
-                role: ASSISTANT,
-                toolCalls: [
-                    {name: "lookupOrder", arguments: {"orderId": "ORD-1"}, id: "call-lookup"},
-                    {name: "nonExistentTool", arguments: {}, id: "call-bogus"}
-                ]
-            };
-        }
-        return {role: ASSISTANT, content: "Done: " + functionMessageCount.toString() + " results"};
-    }
-
-    isolated remote function generate(Prompt prompt, typedesc<anydata> td = <>) returns td|Error = @java:Method {
-        'class: "io.ballerina.lib.ai.MockGenerator"
-    } external;
-}
-
-@test:Config
-function testHumanInTheLoopGatedNameThatFailsValidationDoesNotPause() returns error? {
-    resetHitlLookupOrderCallCount();
-    Agent agent = check new ({
-        systemPrompt: {role: "Test Agent", instructions: "Look up orders"},
-        model: new HitlInvalidGateNameMockLLM(),
-        tools: [hitlCountingLookupOrderTool],
-        approval: {tools: ["nonExistentTool"]}
-    });
-    string sessionId = "hitl-invalid-gate-session";
-
-    // "nonExistentTool" would look gated by name, but since it isn't a registered tool,
-    // validation fails for it and it never actually pauses - the whole batch (including the
-    // real `lookupOrder` call) proceeds straight to execution.
-    string|Error result = agent.run("Look up order ORD-1", sessionId);
-    test:assertTrue(result is string, result is Error ? result.message() : result.toString());
-    if result is string {
-        test:assertEquals(result, "Done: 2 results");
-    }
 }
 
 isolated function secureRefundMock(string orderId, decimal amount) returns string {
@@ -906,21 +872,6 @@ final ToolConfig hitlConditionalRefundTool = {
     requiresApproval: refundRequiresApprovalAboveThreshold
 };
 
-// A plain tool with no local approval rule at all, used to exercise conditional gating
-// supplied purely through `ApprovalConfig.tools` (the mechanism meant for tools that have
-// no local declaration to carry a rule on, e.g. MCP-discovered tools).
-final ToolConfig hitlPlainRefundTool = {
-    name: "plainRefund",
-    description: "Issues a refund for an order",
-    parameters: {
-        properties: {
-            orderId: {'type: STRING},
-            amount: {'type: NUMBER}
-        }
-    },
-    caller: issueRefundMock
-};
-
 // Proposes a single call to whichever tool/arguments it's constructed with, then answers with
 // the resulting observation once one is present in history - mirrors `HitlMockLLM`, just with
 // the proposed call parameterized so one mock can drive every conditional-approval scenario.
@@ -992,54 +943,6 @@ function testConditionalApprovalGatesAboveThreshold() returns error? {
     if resumed is string {
         test:assertTrue(resumed.includes("Refunded 500.0 for ORD-1"), resumed);
     }
-}
-
-@test:Config
-function testConditionalApprovalViaApprovalConfigMapGatesWhenPredicateTrue() returns error? {
-    Agent agent = check new ({
-        systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
-        model: new HitlConditionalMockLLM({name: "plainRefund", arguments: {"orderId": "ORD-1", "amount": 500}, id: "call-1"}),
-        tools: [hitlPlainRefundTool],
-        approval: {tools: {"plainRefund": refundRequiresApprovalAboveThreshold}}
-    });
-    // `plainRefund` carries no local rule at all - the predicate supplied through
-    // `ApprovalConfig.tools` is what gates it here.
-    string|Error result = agent.run("Refund order ORD-1", "hitl-conditional-config-gate-session");
-    test:assertTrue(result is ApprovalRequiredError);
-    if result is ApprovalRequiredError {
-        test:assertEquals(result.detail().requests[0].toolName, "plainRefund");
-    }
-}
-
-@test:Config
-function testConditionalApprovalViaApprovalConfigMapSkipsWhenPredicateFalse() returns error? {
-    Agent agent = check new ({
-        systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
-        model: new HitlConditionalMockLLM({name: "plainRefund", arguments: {"orderId": "ORD-1", "amount": 50}, id: "call-1"}),
-        tools: [hitlPlainRefundTool],
-        approval: {tools: {"plainRefund": refundRequiresApprovalAboveThreshold}}
-    });
-    string|Error result = agent.run("Refund order ORD-1", "hitl-conditional-config-skip-session");
-    test:assertTrue(result is string, result is Error ? result.message() : result.toString());
-    if result is string {
-        test:assertTrue(result.includes("Refunded 50.0 for ORD-1"), result);
-    }
-}
-
-@test:Config
-function testConditionalApprovalLocalRuleTakesPrecedenceOverApprovalConfigMap() returns error? {
-    Agent agent = check new ({
-        systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
-        model: new HitlConditionalMockLLM({name: "issueRefund", arguments: {"orderId": "ORD-1", "amount": 50}, id: "call-1"}),
-        // `issueRefund` already gates unconditionally via its own `ToolConfig` (`hitlRefundTool`,
-        // `requiresApproval: true`). An `ApprovalConfig.tools` entry for the very same name that
-        // would otherwise never gate must be ignored - the tool's own declaration wins, rather
-        // than the two rules being merged or the config entry overriding it.
-        tools: [hitlRefundTool],
-        approval: {tools: {"issueRefund": false}}
-    });
-    string|Error result = agent.run("Refund order ORD-1", "hitl-conditional-precedence-session");
-    test:assertTrue(result is ApprovalRequiredError);
 }
 
 isolated function panickingRequiresApproval(ToolCallDetail detail) returns boolean {
@@ -1200,17 +1103,3 @@ function testMemoryWithoutCheckpointerFallsBackAndStillWorks() returns error? {
     }
 }
 
-@test:Config
-function testGetDestructiveToolNamesFiltersByHint() returns error? {
-    // Pure function, no live MCP server needed: only tools explicitly marked
-    // `destructiveHint: true` are returned - a false hint, an absent hint, and no
-    // annotations at all must all be excluded.
-    mcp:ToolDefinition[] tools = [
-        {name: "deleteResource", inputSchema: {'type: "object"}, annotations: {destructiveHint: true}},
-        {name: "readResource", inputSchema: {'type: "object"}, annotations: {destructiveHint: false}},
-        {name: "listResources", inputSchema: {'type: "object"}, annotations: {}},
-        {name: "pingServer", inputSchema: {'type: "object"}}
-    ];
-    string[] destructiveToolNames = getDestructiveToolNames(tools);
-    test:assertEquals(destructiveToolNames, ["deleteResource"]);
-}

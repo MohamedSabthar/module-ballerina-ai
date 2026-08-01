@@ -113,8 +113,8 @@ type BatchApprovalPending record {|
 # An executor that runs the agent's reasoning-action cycles one at a time. Each cycle is one LLM
 # call (reason) followed by the execution of every tool call returned in that response (act) -
 # except when the response includes a call gated by `@ai:AgentTool {requiresApproval: true}` (or
-# `ApprovalConfig.tools`), in which case nothing in the batch executes until a human has decided
-# every gated call in it (see `act`).
+# `ToolConfig.requiresApproval`), in which case nothing in the batch executes until a human has
+# decided every gated call in it (see `act`).
 class Executor {
     *object:Iterable;
     private boolean isCompleted = false;

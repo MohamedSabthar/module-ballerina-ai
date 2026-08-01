@@ -273,16 +273,3 @@ isolated function fromStoredPendingApproval(StoredPendingApproval stored) return
     pendingRequests: stored.pendingRequests,
     decisions: stored.decisions
 };
-
-# Human-in-the-loop configuration for an agent.
-#
-# Pause/resume state is persisted through the agent's `Memory` when it is a `ShortTermMemory`
-# (which persists checkpoints in its configured `ShortTermMemoryStore`), so it is not configured
-# here.
-public type ApprovalConfig record {|
-    # Extra tools that require approval, addressed by name. A `string[]` gates each named tool
-    # unconditionally. A `map<RequiresApproval>` gates each key by its value, which may be a
-    # per-call predicate. Use this for tools that cannot carry
-    # `@ai:AgentTool {requiresApproval: true}`, such as tools discovered from a remote MCP server.
-    string[]|map<RequiresApproval> tools = [];
-|};

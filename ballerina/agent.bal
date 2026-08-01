@@ -99,10 +99,6 @@ public type AgentConfiguration record {|
     # Optional authentication details of the agent.
     @display {label: "Agent Credential"}
     Credential credential?;
-
-    # Human-in-the-loop configuration.
-    @display {label: "Human-in-the-loop Configuration"}
-    ApprovalConfig approval?;
 |};
 
 # Represents the supported agent type abstractions: an agent whose return type is inferred from the call
@@ -226,9 +222,9 @@ public isolated distinct class Agent {
     # `ShortTermMemory` (which persists checkpoints in its store), otherwise a private in-memory
     # `ShortTermMemory` fallback that is not durable across a restart or a run on another replica.
     final ShortTermMemory checkpointer;
-    # Approval rule for every tool that requires human approval before execution, keyed by
-    # tool name. A tool's own declaration (annotation or `ToolConfig`) takes precedence over an
-    # entry with the same name in `ApprovalConfig.tools`.
+    # Approval rule for every tool that requires human approval before execution, keyed by tool
+    # name. A rule comes from the tool's own declaration - the `@ai:AgentTool {requiresApproval}`
+    # annotation or `ToolConfig.requiresApproval`.
     final readonly & map<RequiresApproval> approvalRules;
     # Indicates whether multiple tool calls from a single LLM response are executed in parallel.
     final boolean executeToolCallsInParallel;
@@ -271,25 +267,10 @@ public isolated distinct class Agent {
             self.toolSchemas = self.toolStore.getToolSchema().cloneReadOnly();
             self.maxIter = maxIter is INFER_TOOL_COUNT ?
                 int:max(self.toolSchemas.length(), DEFAULT_MINIMUM_MAX_ITERATIONS) : maxIter;
-            ApprovalConfig? approvalConfig = config.approval;
             map<RequiresApproval> approvalRules = {};
             foreach Tool tool in self.toolStore.tools {
                 if tool.requiresApproval !is false {
                     approvalRules[tool.name] = tool.requiresApproval;
-                }
-            }
-            string[]|map<RequiresApproval> configApprovalTools = approvalConfig?.tools ?: [];
-            if configApprovalTools is string[] {
-                foreach string name in configApprovalTools {
-                    if !approvalRules.hasKey(name) {
-                        approvalRules[name] = true;
-                    }
-                }
-            } else {
-                foreach [string, RequiresApproval] [name, rule] in configApprovalTools.entries() {
-                    if !approvalRules.hasKey(name) {
-                        approvalRules[name] = rule;
-                    }
                 }
             }
             self.approvalRules = approvalRules.cloneReadOnly();
