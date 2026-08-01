@@ -35,10 +35,8 @@ public type ApprovalRequest record {|
     int batchIndex;
 |};
 
-# A human reviewer's decision on a pending tool call.
-#
-# Only approval and rejection are supported in this release; replacing the proposed arguments
-# before approval is deferred to a later release.
+# A human reviewer's decision on a pending tool call. A call is either approved or rejected;
+# editing the proposed arguments before approval is not supported.
 public enum ApprovalDecision {
     APPROVE,
     REJECT
@@ -64,35 +62,20 @@ public type Resume record {|
     map<HumanResponse> decisions;
 |};
 
-# The specific tool call a `RequiresApproval` predicate is deciding about. Passed as a single
-# record (rather than positional arguments) so the input set can grow later without breaking
-# existing predicate signatures.
-#
-# Deliberately excludes the live `Context`: the predicate must be deterministic given a proposed
-# call, since it is re-evaluated on every resume for calls still awaiting a decision. Depending
-# on mutable external state would risk a call being gated at pause but not at resume, or vice
-# versa.
-public type ToolCallDetail record {|
-    # Name of the tool the agent is proposing to call
-    string toolName;
-    # Arguments the LLM proposed for this specific call. A clone, not the same map instance the
-    # agent later executes the call with - mutating it here has no effect on execution.
-    readonly & map<json> arguments;
-    # The session the call belongs to (useful for per-user or per-tenant policy)
-    string sessionId;
-|};
-
 # Determines whether a tool call requires human approval. `true`/`false` gates the tool
-# unconditionally; a function evaluates the specific call the LLM proposed and decides per call.
+# unconditionally; a function decides per call from the proposed arguments.
 #
-# The function runs synchronously, in-line with reasoning, and must be `isolated`. It is
-# re-evaluated on resume for any call still awaiting a decision, so it must be deterministic
-# given its `ToolCallDetail` (same detail produces the same decision). A function that panics
-# fails safe: the call pauses for approval rather than executing unreviewed.
+# A function predicate is written with the **same parameter signature as the tool it gates** and
+# returns `boolean`. The agent binds the proposed call's arguments to the predicate's parameters
+# by name (exactly as it binds them to the tool), so a predicate for
+# `isolated function issueRefund(string orderId, decimal amount)` is
+# `isolated function (string orderId, decimal amount) returns boolean`. Only the tool's own
+# (`anydata`) parameters are supported.
 #
-# + detail - The specific tool call being evaluated
-# + return - `true` if this call should pause for a human decision
-public type RequiresApproval boolean|isolated function (ToolCallDetail detail) returns boolean;
+# The function runs synchronously, in-line with reasoning, and must be `isolated`. It must be
+# deterministic given the proposed call's arguments. A function that panics (or whose result is
+# not a `boolean`) fails safe: the call pauses for approval rather than executing unreviewed.
+public type RequiresApproval boolean|isolated function;
 
 # The pending approval persisted across a pause, sufficient to resume the run
 # without reloading conversation history from `Memory`.

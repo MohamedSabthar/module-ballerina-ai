@@ -203,8 +203,7 @@ class Executor {
         foreach int i in 0 ..< llmResponse.length() {
             decisions.push(());
         }
-        int[] gatedIndices = findAllGatedIndices(self.agent, self.progress.context, self.sessionId,
-                llmResponse, decisions);
+        int[] gatedIndices = findAllGatedIndices(self.agent, llmResponse, decisions);
         if gatedIndices.length() == 0 {
             boolean isParallel = self.agent.executeToolCallsInParallel && llmResponse.length() > 1;
             return self.executeToolCalls(llmResponse, isParallel);
@@ -281,8 +280,7 @@ class Executor {
             returns (ExecutionResult|ExecutionError)[]|BatchApprovalPending {
         HumanResponse?[] decisions = applySuppliedDecisions(seeded.pendingRequests, seeded.decisions,
                 seeded.suppliedDecisions);
-        int[] gatedIndices = findAllGatedIndices(self.agent, self.progress.context, self.sessionId,
-                seeded.originalBatch, decisions);
+        int[] gatedIndices = findAllGatedIndices(self.agent, seeded.originalBatch, decisions);
         if gatedIndices.length() > 0 {
             // Every position still gated here was already surfaced in `seeded.pendingRequests`
             // (a partial resume can only ever shrink the gated set, never grow it), so its
@@ -525,13 +523,11 @@ isolated function executeToolCall(Agent agent, FunctionCall llmResponse, Context
 # evaluates to `true` and would actually pass validation.
 #
 # + agent - Agent being executed
-# + context - Contextual information to be used by the tool during execution
-# + sessionId - The session the batch belongs to
 # + batch - The full batch of tool calls proposed in this LLM turn
 # + decisions - Decisions already gathered for earlier positions in `batch`
 # + return - Every position (in order) still needing a human decision
-isolated function findAllGatedIndices(Agent agent, Context context, string sessionId,
-        FunctionCall[] batch, HumanResponse?[] decisions) returns int[] {
+isolated function findAllGatedIndices(Agent agent, FunctionCall[] batch, HumanResponse?[] decisions)
+        returns int[] {
     ToolStore toolStore = agent.toolStore;
     int[] gated = [];
     foreach int i in 0 ..< batch.length() {
@@ -550,7 +546,7 @@ isolated function findAllGatedIndices(Agent agent, Context context, string sessi
         string? agentId = agentCredential is Credential ? agentCredential.id : ();
         ToolNotFoundError|ToolInvalidInputError? validateRes =
                 validateToolNameAndInput(parsedOutput, toolStore.tools, agentId);
-        if validateRes is () && callRequiresApproval(agent, call, sessionId) {
+        if validateRes is () && callRequiresApproval(agent, call) {
             gated.push(i);
         }
         // name matched but would fail validation - not a pause candidate; it'll surface as a
@@ -561,15 +557,13 @@ isolated function findAllGatedIndices(Agent agent, Context context, string sessi
 }
 
 # Whether this specific call should pause for approval. A boolean rule gates (or not)
-# unconditionally. A function rule is evaluated against this call's own detail and fails safe to
-# `true` if it panics, so a rule that misbehaves on an unexpected argument shape still pauses
-# the call rather than letting it execute unreviewed.
+# unconditionally. A function rule is invoked with the proposed call's arguments bound to its
+# parameters (the same way the tool itself is invoked) and gates on its `boolean` result.
 #
 # + agent - Agent being executed
 # + call - The specific tool call being evaluated
-# + sessionId - The session the call belongs to
 # + return - `true` if this call should pause for a human decision
-isolated function callRequiresApproval(Agent agent, FunctionCall call, string sessionId) returns boolean {
+isolated function callRequiresApproval(Agent agent, FunctionCall call) returns boolean {
     RequiresApproval? rule = agent.approvalRules[call.name];
     if rule is () {
         return false;
@@ -577,9 +571,44 @@ isolated function callRequiresApproval(Agent agent, FunctionCall call, string se
     if rule is boolean {
         return rule;
     }
-    ToolCallDetail detail = {toolName: call.name, arguments: (call.arguments ?: {}).cloneReadOnly(), sessionId};
-    boolean|error evaluated = trap rule(detail);
-    return evaluated is error ? true : evaluated;
+    return evaluateApprovalPredicate(rule, call.arguments ?: {});
+}
+
+# Invokes a function-valued approval predicate the way a tool is invoked: the proposed call's
+# arguments are bound to the predicate's parameters by name (with defaults filled), then it is
+# called and its `boolean` result decides gating.
+#
+# Fails safe to `true` (pause) if the predicate panics, returns a non-`boolean`, or cannot be
+# bound - so a misbehaving rule pauses the call rather than letting it execute unreviewed. Only the
+# tool's own `anydata` parameters are bound; a predicate that declares an `ai:Context` parameter
+# cannot be bound and therefore fails safe here (and is rejected at compile time on the annotation
+# path, where its signature does not match the tool).
+#
+# + rule - The function predicate to evaluate
+# + arguments - The arguments the LLM proposed for this call
+# + return - `true` if the call should pause for a human decision
+isolated function evaluateApprovalPredicate(isolated function rule, map<json> arguments) returns boolean {
+    anydata[]|error boundArgs = bindApprovalPredicateArguments(rule, arguments);
+    if boundArgs is error {
+        return true;
+    }
+    any|error evaluated = trap function:call(rule, ...boundArgs);
+    return evaluated is boolean ? evaluated : true;
+}
+
+isolated function bindApprovalPredicateArguments(isolated function rule, map<json> arguments)
+        returns anydata[]|error {
+    map<anydata> inputArgs = {};
+    map<typedesc<anydata|Context>> typedescs = getToolParameterTypes(rule);
+    foreach [string, typedesc<anydata|Context>] [parameterName, typedescriptor] in typedescs.entries() {
+        if arguments.hasKey(parameterName) && typedescriptor is typedesc<anydata> && !isContextType(typedescriptor) {
+            inputArgs[parameterName] = check arguments.get(parameterName).cloneWithType(typedescriptor);
+        }
+    }
+    // Excludes any `Context` parameter from the ordered arguments; a predicate that declares one
+    // therefore gets too few arguments and fails the call (fail-safe to pause).
+    map<anydata> argsWithDefaults = check trap getArgsWithDefaultsExcludingContext(rule, inputArgs);
+    return argsWithDefaults.toArray().cloneReadOnly();
 }
 
 isolated function buildApprovalRequest(Agent agent, FunctionCall call, string sessionId, int batchIndex)

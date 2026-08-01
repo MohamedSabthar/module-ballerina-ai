@@ -848,16 +848,10 @@ function testResumeWithUnknownApprovalIdFailsAndRestoresState() returns error? {
 
 // ---- Conditional (per-call) approval ----
 
-isolated function refundRequiresApprovalAboveThreshold(ToolCallDetail detail) returns boolean {
-    json amount = detail.arguments["amount"];
-    if amount is int {
-        return amount > 100;
-    }
-    if amount is decimal {
-        return amount > 100d;
-    }
-    return false;
-}
+// Predicate written with the same signature as the tool it gates (`issueRefund`), so it works with
+// the typed arguments directly instead of digging through a `json` map.
+isolated function refundRequiresApprovalAboveThreshold(string orderId, decimal amount) returns boolean =>
+    amount > 100d;
 
 final ToolConfig hitlConditionalRefundTool = {
     name: "issueRefund",
@@ -945,12 +939,10 @@ function testConditionalApprovalGatesAboveThreshold() returns error? {
     }
 }
 
-isolated function panickingRequiresApproval(ToolCallDetail detail) returns boolean {
-    // Deliberately mis-cast to force a panic regardless of the arguments supplied, exercising
-    // the fail-safe path rather than any particular argument shape.
-    json amount = detail.arguments["amount"];
-    map<json> forcedCast = <map<json>>amount;
-    return forcedCast.length() > 0;
+isolated function panickingRequiresApproval(string orderId, decimal amount) returns boolean {
+    // Deliberately panic (index out of range) to exercise the fail-safe path.
+    int[] empty = [];
+    return empty[5] > 0;
 }
 
 final ToolConfig hitlPanickyRefundTool = {
