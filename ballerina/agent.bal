@@ -177,14 +177,6 @@ public type DependentlyTypedAgent distinct isolated object {
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new,
             typedesc<Trace|anydata> td = <>) returns td|Error;
-
-    # Returns the approvals currently pending on `sessionId`, if any. Lets callers inspect what a
-    # paused run is waiting on (via the documented abstraction) before deciding how to resume it.
-    #
-    # + sessionId - The ID associated with the agent memory
-    # + return - Every currently pending approval request, `()` if none is pending, or an `ai:Error`
-    public isolated function getPendingApproval(@display {label: "Session ID"} string sessionId)
-            returns ApprovalRequest[]?|Error;
 };
 
 # Represents a reusable agent definition with a fixed `anydata` return type. Implementations typically
@@ -540,22 +532,6 @@ public isolated distinct class Agent {
             pendingApproval.startTime, td, span, pendingApproval.sessionId,
             "Agent execution already has a pending approval; a new run was started before it was resumed",
             "", "");
-    }
-
-    # Returns the approvals currently pending on `sessionId`, if any.
-    #
-    # + sessionId - The ID associated with the agent memory
-    # + return - Every currently pending approval request, `()` if none is pending, or an `ai:Error`
-    public isolated function getPendingApproval(@display {label: "Session ID"} string sessionId)
-            returns ApprovalRequest[]?|Error {
-        PendingApproval?|Error pendingApprovalResult = self.checkpointer.getCheckpoint(sessionId);
-        if pendingApprovalResult is Error {
-            return pendingApprovalResult;
-        }
-        if pendingApprovalResult is () || !isPendingApprovalHistoryValid(pendingApprovalResult) {
-            return ();
-        }
-        return pendingApprovalResult.pendingRequests;
     }
 
     # Continues a run that paused for human approval on `sessionId`, applying the supplied decisions.

@@ -110,9 +110,11 @@ function testHumanInTheLoopApprove() returns error? {
         test:assertTrue(resumed.includes("Refunded 50.0 for ORD-1"), resumed);
     }
 
-    // The approval should have been cleared on successful completion.
-    ApprovalRequest[]? pending = check agent.getPendingApproval(sessionId);
-    test:assertEquals(pending, ());
+    // The approval should have been cleared on successful completion: resuming it again finds nothing.
+    if result is ApprovalRequiredError {
+        string|Error repeat = agent.run(singleResume(result, {decision: APPROVE}), sessionId);
+        test:assertTrue(repeat is ApprovalNotFoundError);
+    }
 }
 
 // Proposes the gated `issueRefund` on the first turn, then delivers its final answer through the
@@ -197,13 +199,6 @@ function testResumeWithoutPendingApprovalFails() returns error? {
     Agent agent = check newHitlTestAgent();
     string|Error resumed = agent.run({decisions: {"any-id": {decision: APPROVE}}}, "no-such-hitl-session");
     test:assertTrue(resumed is ApprovalNotFoundError);
-}
-
-@test:Config
-function testGetPendingApprovalIsNilWhenNothingIsPending() returns error? {
-    Agent agent = check newHitlTestAgent();
-    ApprovalRequest[]? pending = check agent.getPendingApproval("hitl-no-pending-session");
-    test:assertEquals(pending, ());
 }
 
 @test:Config
@@ -682,9 +677,11 @@ function testHumanInTheLoopUnauthorizedErrorInResolvedBatchEndsRunWithoutPersist
     if resumed is string {
         test:assertTrue(resumed.includes("authorization issue"), resumed);
     }
-    // The run ended due to the auth failure - no pending approval should remain.
-    ApprovalRequest[]? pending = check agent.getPendingApproval(sessionId);
-    test:assertEquals(pending, ());
+    // The run ended due to the auth failure - no pending approval should remain: a repeat resume finds nothing.
+    if result is ApprovalRequiredError {
+        string|Error repeat = agent.run(singleResume(result, {decision: APPROVE}), sessionId);
+        test:assertTrue(repeat is ApprovalNotFoundError);
+    }
 }
 
 @test:Config
@@ -705,12 +702,10 @@ function testRunWhilePendingApprovalReturnsSamePause() returns error? {
         test:assertEquals(secondResult.detail().requests[0].toolName, "issueRefund");
     }
 
-    // The original pending approval is still exactly what it was.
-    ApprovalRequest[]? stillPending = check agent.getPendingApproval(sessionId);
-    test:assertTrue(stillPending is ApprovalRequest[]);
-    if stillPending is ApprovalRequest[] && firstResult is ApprovalRequiredError {
-        test:assertEquals(stillPending.length(), 1);
-        test:assertEquals(stillPending[0].id, firstResult.detail().requests[0].id);
+    // The original pending approval survived the second run() untouched, so it is still resumable.
+    if firstResult is ApprovalRequiredError {
+        string|Error resumed = agent.run(singleResume(firstResult, {decision: APPROVE}), sessionId);
+        test:assertTrue(resumed is string, resumed is Error ? resumed.message() : "");
     }
 }
 
@@ -834,23 +829,6 @@ function testResumeFailsFastOnCorruptedHistory() returns error? {
     if resumed is Error {
         test:assertTrue(resumed.message().includes("corrupted history"), resumed.message());
     }
-}
-
-@test:Config
-function testGetPendingApprovalTreatsCorruptedAsAbsentWithoutMutating() returns error? {
-    string sessionId = "hitl-get-corrupted-session";
-    FixedCheckpointStore checkpointStore = new ("corrupted-approval-3");
-    ShortTermMemory checkpointMemory = check new (store = checkpointStore);
-    Agent agent = check new ({
-        systemPrompt: {role: "Test Agent", instructions: "Handle refunds"},
-        model: new HitlMockLLM(),
-        tools: [hitlRefundTool],
-        memory: checkpointMemory
-    });
-
-    ApprovalRequest[]? pending = check agent.getPendingApproval(sessionId);
-    test:assertEquals(pending, ());
-    test:assertFalse(checkpointStore.wasRemoveCalled());
 }
 
 @test:Config
