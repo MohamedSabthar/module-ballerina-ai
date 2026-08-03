@@ -158,18 +158,18 @@ public type AgentMetadataConfig record {|
 # Callers decide whether they want the full `Trace`, the raw `string` answer, or the answer bound 
 # to a structured `anydata` type.
 public type DependentlyTypedAgent distinct isolated object {
-    # Executes the agent for the given input and binds the result to the inferred return type.
+    # Executes the agent for the given query and binds the result to the inferred return type.
     #
     # Pass a `string`/`Prompt` to start a new turn, or a `Resume` (the human's decisions on a
     # previously paused run) to continue a run that paused for human approval. The input type is
     # what distinguishes the two - there is no separate resume operation.
     #
-    # + input - A query to start a new turn (`string`/`Prompt`), or a `Resume` to continue a paused run
+    # + query - A query to start a new turn (`string`/`Prompt`), or a `Resume` to continue a paused run
     # + sessionId - The ID associated with the agent memory
     # + context - The additional context that can be used during agent tool execution
     # + td - Type descriptor specifying the expected return type format
     # + return - The agent's response bound to `td`, or an `Error`
-    public isolated function run(@display {label: "Input"} string|Prompt|Resume input,
+    public isolated function run(@display {label: "Query"} string|Prompt|Resume query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new,
             typedesc<Trace|anydata> td = <>) returns td|Error;
@@ -383,7 +383,7 @@ public isolated distinct class Agent {
             llmResponse = content);
     }
 
-    # Executes the agent for a given input.
+    # Executes the agent for a given query.
     #
     # Pass a `string`/`Prompt` to start a new turn, or a `Resume` (the human's decisions on a
     # previously paused run) to continue a run that paused for human approval on this session. The
@@ -393,27 +393,26 @@ public isolated distinct class Agent {
     # **Note:** Calls to this function using the same session ID must be invoked sequentially by the caller,
     # as this operation is not thread-safe.
     #
-    # + input - A query to start a new turn (`string`/`Prompt`), or a `Resume` to continue a paused run
+    # + query - A query to start a new turn (`string`/`Prompt`), or a `Resume` to continue a paused run
     # + sessionId - The ID associated with the agent memory
     # + context - The additional context that can be used during agent tool execution
     # + td - Type descriptor specifying the expected return type format
     # + return - The agent's response or an error
-    public isolated function run(@display {label: "Input"} string|Prompt|Resume input,
+    public isolated function run(@display {label: "Query"} string|Prompt|Resume query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new,
             typedesc<Trace|anydata> td = <>) returns td|Error = @java:Method {
         'class: "io.ballerina.stdlib.ai.Agent"
     } external;
 
-    private isolated function runInternal(@display {label: "Input"} string|Prompt|Resume input,
+    private isolated function runInternal(@display {label: "Query"} string|Prompt|Resume query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new, typedesc<Trace|anydata> td = string) returns Trace|anydata|Error {
         // A `Resume` input continues a run that paused for human approval instead of starting a
         // new turn; the input type is the sole discriminator between the two.
-        if input is Resume {
-            return self.resumeInternal(sessionId, input.decisions, context, td);
+        if query is Resume {
+            return self.resumeInternal(sessionId, query.decisions, context, td);
         }
-        string|Prompt query = input;
         // A prior call on this session may still be awaiting a human decision. Starting a
         // fresh run regardless would silently orphan that pending approval (and, if this new
         // run also happens to pause, `checkpointer.put` would overwrite it outright) - so
