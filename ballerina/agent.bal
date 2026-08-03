@@ -160,12 +160,16 @@ public type AgentMetadataConfig record {|
 public type DependentlyTypedAgent distinct isolated object {
     # Executes the agent for the given query and binds the result to the inferred return type.
     #
-    # + query - The query to be executed by the agent, as a plain string or a `Prompt` template
+    # Pass a `string`/`Prompt` to start a new turn, or a `Resume` (the human's decisions on a
+    # previously paused run) to continue a run that paused for human approval. The input type is
+    # what distinguishes the two - there is no separate resume operation.
+    #
+    # + query - A query to start a new turn (`string`/`Prompt`), or a `Resume` to continue a paused run
     # + sessionId - The ID associated with the agent memory
     # + context - The additional context that can be used during agent tool execution
     # + td - Type descriptor specifying the expected return type format
     # + return - The agent's response bound to `td`, or an `Error`
-    public isolated function run(@display {label: "Query"} string|Prompt query,
+    public isolated function run(@display {label: "Query"} string|Prompt|Resume query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new,
             typedesc<Trace|anydata> td = <>) returns td|Error;
@@ -214,6 +218,14 @@ public isolated distinct class Agent {
     final cache:Cache tokenManager = new ();
     # Authentication configuration used for acquiring OAuth tokens when accessing secured tools.
     final readonly & Credential? agentCredential;
+    # Persists HITL pause checkpoints. The configured `memory` itself when it is a
+    # `ShortTermMemory` (which persists checkpoints in its store), otherwise a private in-memory
+    # `ShortTermMemory` fallback that is not durable across a restart or a run on another replica.
+    final ShortTermMemory checkpointer;
+    # Approval rule for every tool that requires human approval before execution, keyed by tool
+    # name. A rule comes from the tool's own declaration - the `@ai:AgentTool {requiresApproval}`
+    # annotation or `ToolConfig.requiresApproval`.
+    final readonly & map<RequiresApproval> approvalRules;
     # Indicates whether multiple tool calls from a single LLM response are executed in parallel.
     final boolean executeToolCallsInParallel;
     private final int maxIter;
@@ -255,6 +267,29 @@ public isolated distinct class Agent {
             self.toolSchemas = self.toolStore.getToolSchema().cloneReadOnly();
             self.maxIter = maxIter is INFER_TOOL_COUNT ?
                 int:max(self.toolSchemas.length(), DEFAULT_MINIMUM_MAX_ITERATIONS) : maxIter;
+            map<RequiresApproval> approvalRules = {};
+            foreach Tool tool in self.toolStore.tools {
+                if tool.requiresApproval !is false {
+                    approvalRules[tool.name] = tool.requiresApproval;
+                }
+            }
+            self.approvalRules = approvalRules.cloneReadOnly();
+            // The HITL pause checkpoint is persisted through `memory` when it is a
+            // `ShortTermMemory` (which persists checkpoints in its configured store), so a single
+            // configured store serves both the conversation history and the pause state.
+            // Otherwise fall back to a private in-memory `ShortTermMemory`, warning if any tool can
+            // actually gate, since pauses then won't survive a restart or a run on another replica.
+            Memory agentMemory = self.memory;
+            if agentMemory is ShortTermMemory {
+                self.checkpointer = agentMemory;
+            } else {
+                self.checkpointer = check new ShortTermMemory();
+                if approvalRules.length() > 0 {
+                    log:printWarn("The configured memory does not support durable checkpointing; " +
+                        "human-in-the-loop pauses will not survive a restart or run on another " +
+                        "replica. Use `ShortTermMemory` for durable human-in-the-loop.");
+                }
+            }
             span.addTools(self.toolStore.getToolsInfo());
             if agentIdentitySpan is observe:CreateAgentIdentitySpan {
                 agentIdentitySpan.close();
@@ -348,26 +383,63 @@ public isolated distinct class Agent {
             llmResponse = content);
     }
 
-    # Executes the agent for a given user query.
+    # Executes the agent for a given query.
     #
-    # **Note:** Calls to this function using the same session ID must be invoked sequentially by the caller, 
+    # Pass a `string`/`Prompt` to start a new turn, or a `Resume` (the human's decisions on a
+    # previously paused run) to continue a run that paused for human approval on this session. The
+    # input type is what distinguishes a fresh turn from a resume - there is no separate resume
+    # operation. A `Resume` for a session with no pending approval fails with `ApprovalNotFoundError`.
+    #
+    # **Note:** Calls to this function using the same session ID must be invoked sequentially by the caller,
     # as this operation is not thread-safe.
     #
-    # + query - The natural language input provided to the agent
+    # + query - A query to start a new turn (`string`/`Prompt`), or a `Resume` to continue a paused run
     # + sessionId - The ID associated with the agent memory
     # + context - The additional context that can be used during agent tool execution
     # + td - Type descriptor specifying the expected return type format
     # + return - The agent's response or an error
-    public isolated function run(@display {label: "Query"} string|Prompt query,
+    public isolated function run(@display {label: "Query"} string|Prompt|Resume query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new,
             typedesc<Trace|anydata> td = <>) returns td|Error = @java:Method {
         'class: "io.ballerina.stdlib.ai.Agent"
     } external;
 
-    private isolated function runInternal(@display {label: "Query"} string|Prompt query,
+    private isolated function runInternal(@display {label: "Query"} string|Prompt|Resume query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new, typedesc<Trace|anydata> td = string) returns Trace|anydata|Error {
+        // A `Resume` input continues a run that paused for human approval instead of starting a
+        // new turn; the input type is the sole discriminator between the two.
+        if query is Resume {
+            return self.resumeInternal(sessionId, query.decisions, context, td);
+        }
+        // A prior call on this session may still be awaiting a human decision. Starting a
+        // fresh run regardless would silently orphan that pending approval (and, if this new
+        // run also happens to pause, `checkpointer.put` would overwrite it outright) - so
+        // check first, rather than let a new, unrelated turn interleave with an unresolved one.
+        PendingApproval?|Error existingApprovalResult = self.checkpointer.getCheckpoint(sessionId);
+        if existingApprovalResult is Error {
+            // Trace this earliest guard failure too, matching how `resumeInternal` opens its span
+            // before its own guards - otherwise a checkpoint-store failure here goes unobserved.
+            observe:InvokeAgentSpan errorSpan = observe:createInvokeAgentSpan(self.systemPrompt.role);
+            errorSpan.addId(self.uniqueId);
+            errorSpan.addSessionId(sessionId);
+            errorSpan.close(existingApprovalResult);
+            return existingApprovalResult;
+        }
+        if existingApprovalResult is PendingApproval {
+            if !isPendingApprovalHistoryValid(existingApprovalResult) {
+                log:printWarn("Clearing a corrupted pending approval to allow a new run", sessionId = sessionId);
+                Error? removeErr = self.checkpointer.removeCheckpoint(sessionId);
+                if removeErr is Error {
+                    log:printError("Failed to remove the corrupted pending approval", removeErr, sessionId = sessionId);
+                }
+                // Fall through - proceed with a fresh run below.
+            } else {
+                return self.buildPendingApprovalTrace(existingApprovalResult, td, toString(query));
+            }
+        }
+
         time:Utc startTime = time:utcNow();
         string executionId = uuid:createRandomUuid();
         string queryString = toString(query);
@@ -399,13 +471,259 @@ public isolated distinct class Agent {
         Credential? & readonly agentCredential = self.agentCredential;
         string? agentId = agentCredential is Credential ? agentCredential.id : ();
         ExecutionTrace executionTrace = run(self, systemPrompt, query, self.maxIter, self.verbose, agentId,
-                sessionId, context, executionId, responseSchema);
+            sessionId, context, executionId, startTime, responseSchema);
         ChatUserMessage userMessage = {role: USER, content: query};
+        return self.buildOutcome(executionId, userMessage, executionTrace, startTime, td, span, sessionId,
+            "Agent execution paused pending human approval",
+            "Agent execution completed successfully",
+            "Agent execution failed");
+    }
+
+    # Builds the `ApprovalRequiredError`/`Trace` for a still-live pending approval, without
+    # starting a new run - used when `run()` is called again before the pending decision on
+    # `sessionId` has been resolved, so the caller sees the same pause instead of silently
+    # starting an unrelated turn that would orphan it.
+    #
+    # + pendingApproval - The still-live pending approval found for this session
+    # + td - Type descriptor specifying the expected return type format
+    # + attemptedQuery - The new query that was rejected because a pause is still outstanding,
+    #                    recorded on the span so the short-circuited attempt is visible in the trace
+    # + return - The agent's response bound to `td`, or an error
+    private isolated function buildPendingApprovalTrace(PendingApproval pendingApproval,
+            typedesc<Trace|anydata> td, string attemptedQuery) returns Trace|anydata|Error {
+        ApprovalRequiredError stillPending = error ApprovalRequiredError(
+            string `${pendingApproval.pendingRequests.length()} tool call(s) are still awaiting approval for ` +
+                string `session '${pendingApproval.sessionId}'; resume it (pass a Resume) before starting a new run.`,
+            requests = pendingApproval.pendingRequests);
+        // Safe: `isPendingApprovalHistoryValid` was already checked by the caller.
+        ChatUserMessage userMessage =
+            <ChatUserMessage>pendingApproval.history[pendingApproval.historyPrefixLength - 1];
+        ExecutionTrace shortCircuitTrace = {
+            steps: [],
+            iterations: pendingApproval.iterations,
+            toolCalls: pendingApproval.toolCalls,
+            pendingApproval: stillPending
+        };
+        observe:InvokeAgentSpan span = observe:createInvokeAgentSpan(self.systemPrompt.role);
+        span.addId(self.uniqueId);
+        span.addSessionId(pendingApproval.sessionId);
+        span.addInput(attemptedQuery);
+        return self.buildOutcome(pendingApproval.executionId, userMessage, shortCircuitTrace,
+            pendingApproval.startTime, td, span, pendingApproval.sessionId,
+            "Agent execution already has a pending approval; a new run was started before it was resumed",
+            "", "");
+    }
+
+    # Continues a run that paused for human approval on `sessionId`, applying the supplied decisions.
+    # Reached from `run` when its input is a `Resume`; not a public entry point of its own.
+    #
+    # + sessionId - The ID associated with the agent memory
+    # + feedback - The human's decisions, keyed by `ApprovalRequest.id`
+    # + context - The additional context that can be used during agent tool execution
+    # + td - Type descriptor specifying the expected return type format
+    # + return - The agent's response bound to `td`, or an error
+    private isolated function resumeInternal(string sessionId, map<HumanResponse> feedback,
+            Context context = new, typedesc<Trace|anydata> td = string) returns Trace|anydata|Error {
+        log:printDebug("Agent resume started",
+                agentId = self.agentId,
+                sessionId = sessionId
+        );
+
+        // Opened before the guard checks below so a rejected resume (no pending approval, corrupted
+        // state, unknown id) still produces one errored span, matching how the fresh-run path traces
+        // its own early failures (e.g. a bad `td` schema).
+        observe:InvokeAgentSpan span = observe:createInvokeAgentSpan(self.systemPrompt.role);
+        span.addId(self.uniqueId);
+        span.addSessionId(sessionId);
+        // A resume has no query; its input is the human's decisions. Recorded before the guards
+        // so even a rejected resume's span shows which decisions were attempted.
+        span.addInput(string `resume decisions: ${feedback.toJsonString()}`);
+
+        // Claimed eagerly (removed from the store immediately, not just on resolution), so a
+        // concurrent duplicate resume for the same session finds nothing and fails
+        // fast with `ApprovalNotFoundError` instead of also executing the approved tool call.
+        // `executeAgentLoop`'s pause branch already unconditionally re-persists a fresh
+        // `PendingApproval` if this call pauses again (e.g. another gate still undecided in the
+        // same batch), so claiming here composes correctly with that existing flow.
+        PendingApproval?|Error pendingApprovalResult = self.checkpointer.takeCheckpoint(sessionId);
+        if pendingApprovalResult is Error {
+            span.close(pendingApprovalResult);
+            return pendingApprovalResult;
+        }
+        if pendingApprovalResult is () {
+            ApprovalNotFoundError notFound =
+                error ApprovalNotFoundError("No pending approval found for session '" + sessionId + "'.");
+            span.close(notFound);
+            return notFound;
+        }
+        PendingApproval pendingApproval = pendingApprovalResult;
+        if !isPendingApprovalHistoryValid(pendingApproval) {
+            log:printError("Pending approval has an invalid history snapshot",
+                    sessionId = sessionId,
+                    historyLength = pendingApproval.history.length(),
+                    historyPrefixLength = pendingApproval.historyPrefixLength
+            );
+            Error corrupted =
+                error Error("The pending approval for session '" + sessionId + "' has a corrupted history " +
+                    "snapshot and cannot be resumed. This should never happen with the built-in " +
+                    "`ShortTermMemory`; check any custom `ShortTermMemoryStore` implementation in use.");
+            span.close(corrupted);
+            return corrupted;
+        }
+
+        // Not the claimed record's fault - nothing was actually resolved - so restore it
+        // before returning, rather than leaving it lost after a caller mistake.
+        string[] unknownIds = findUnknownApprovalIds(feedback, pendingApproval.pendingRequests);
+        if unknownIds.length() > 0 {
+            self.restoreClaimedApproval(pendingApproval, sessionId);
+            UnknownApprovalIdError unknown = error UnknownApprovalIdError(
+                    string `The following ids are not currently pending for session '${sessionId}': ` +
+                        unknownIds.toString());
+            span.close(unknown);
+            return unknown;
+        }
+
+        // Emit a dedicated child span so the human's decisions are visible as their own node in
+        // the trace, making it clear at a glance where and how a human intervened on resume.
+        observe:ResolveHumanApprovalSpan resolveSpan = observe:createResolveHumanApprovalSpan(sessionId);
+        resolveSpan.addDecisions(from ApprovalRequest req in pendingApproval.pendingRequests
+            where feedback.hasKey(req.id)
+            select {id: req.id, toolName: req.toolName, decision: feedback.get(req.id).decision});
+        resolveSpan.close();
+
+        // Carry the original run's start time forward, so `Trace.startTime` reflects the
+        // whole logical run rather than just this resume call.
+        time:Utc startTime = pendingApproval.startTime;
+        string executionId = pendingApproval.executionId;
+
+        Credential? & readonly agentCredential = self.agentCredential;
+        string? agentId = agentCredential is Credential ? agentCredential.id : ();
+        // Re-derive the structured-output schema from the caller's `td` rather than persisting it
+        // in the checkpoint. `td` is the authoritative return type on resume (it's what the final
+        // answer binds to), and the instruction telling the model to use the tool is already in the
+        // persisted history, so deriving here reproduces the same tool the original run exposed.
+        ResponseSchema? responseSchema = ();
+        if td !is typedesc<string|Trace> && td is typedesc<anydata> {
+            ResponseSchema|Error schema = getResponseSchemaForType(td);
+            if schema is Error {
+                span.close(schema);
+                return schema;
+            }
+            responseSchema = schema;
+        }
+        ExecutionTrace executionTrace = resumeRun(self, pendingApproval, feedback, self.maxIter,
+            self.verbose, agentId, sessionId, context, responseSchema);
+        // Safe: `isPendingApprovalHistoryValid` above already guarantees this index is in range.
+        ChatUserMessage userMessage = <ChatUserMessage>pendingApproval.history[pendingApproval.historyPrefixLength - 1];
+        return self.buildOutcome(executionId, userMessage, executionTrace, startTime, td, span, sessionId,
+            "Agent execution paused again pending human approval",
+            "Agent resume completed successfully",
+            "Agent resume failed");
+    }
+
+    # Re-persists a `PendingApproval` claimed by `take()` when a resume call names an unknown
+    # id before anything was actually resolved, so the caller can simply retry resume with a
+    # corrected decision instead of losing the pause.
+    #
+    # + pendingApproval - The claimed pending approval to restore, unchanged
+    # + sessionId - The ID associated with the agent memory
+    private isolated function restoreClaimedApproval(PendingApproval pendingApproval, string sessionId) {
+        Error? restoreErr = self.checkpointer.putCheckpoint(pendingApproval);
+        if restoreErr is Error {
+            log:printError("Failed to restore the claimed pending approval after an invalid resume call",
+                    restoreErr, sessionId = sessionId);
+        }
+    }
+
+    # Shared by both entry paths of `runInternal` (a fresh turn and a `Resume`): turns an
+    # `ExecutionTrace` into the agent's public result - a pause passthrough, a successful answer
+    # bound to `td`, or a failure - wrapped in a `Trace` when `td` is `Trace`, otherwise bound to
+    # `td` (a `string`, or a concrete `anydata` type parsed from the structured answer).
+    #
+    # + executionId - Identifier of the logical execution this outcome belongs to
+    # + userMessage - The turn's user message, for the returned `Trace`
+    # + executionTrace - The trace produced by `run`/`resumeRun` for this call
+    # + startTime - The logical run's start time, for the returned `Trace`
+    # + td - Type descriptor specifying the expected return type format
+    # + span - Observability span for this call, closed with the outcome
+    # + sessionId - The ID associated with the agent memory
+    # + pauseLogMessage - Message logged when the execution paused for human approval
+    # + successLogMessage - Message logged when the execution completed successfully
+    # + failedLogMessage - Message logged when the execution failed
+    # + return - The agent's response bound to `td`, or an error
+    private isolated function buildOutcome(string executionId, ChatUserMessage userMessage,
+            ExecutionTrace executionTrace, time:Utc startTime, typedesc<Trace|anydata> td,
+            observe:InvokeAgentSpan span, string sessionId, string pauseLogMessage, string successLogMessage,
+            string failedLogMessage) returns Trace|anydata|Error {
+        boolean withTrace = td is typedesc<Trace>;
         Iteration[] iterations = executionTrace.iterations;
         FunctionCall[]? toolCalls = executionTrace.toolCalls.length() == 0 ? () : executionTrace.toolCalls;
+
+        Error? fatalError = executionTrace.fatalError;
+        if fatalError is Error {
+            log:printError(failedLogMessage, fatalError,
+                    executionId = executionId,
+                    agentId = self.agentId,
+                    sessionId = sessionId
+            );
+            span.close(fatalError);
+            // Mirror the withTrace wrapping used by the other failure branches, so a caller
+            // requesting a `Trace` still gets the iteration/tool-call context on a fatal failure.
+            return withTrace
+                ? {
+                    id: executionId,
+                    userMessage,
+                    iterations,
+                    tools: self.toolSchemas,
+                    startTime,
+                    endTime: time:utcNow(),
+                    output: fatalError,
+                    toolCalls
+                }
+                : fatalError;
+        }
+
+        ApprovalRequiredError? pendingApproval = executionTrace.pendingApproval;
+        if pendingApproval is ApprovalRequiredError {
+            log:printDebug(pauseLogMessage,
+                    executionId = executionId,
+                    agentId = self.agentId,
+                    sessionId = sessionId
+            );
+            // A pause for human approval is normal control flow, not a failure - closing the span
+            // with the `ApprovalRequiredError` would mark it as errored and pollute error metrics.
+            // Record what it paused on as a structured output and close the span successfully.
+            ApprovalRequest[] requests = pendingApproval.detail().requests;
+            span.addOutput(observe:JSON, {
+                status: "approval_required",
+                pendingCount: requests.length(),
+                tools: from ApprovalRequest req in requests select req.toolName
+            });
+            // Emit a dedicated child span so the pause is visible as its own node in the trace,
+            // making it clear at a glance where the run stopped to wait for a human.
+            observe:RequestHumanApprovalSpan approvalSpan = observe:createRequestHumanApprovalSpan(sessionId);
+            approvalSpan.addPendingCount(requests.length());
+            approvalSpan.addRequests(from ApprovalRequest req in requests
+                select {id: req.id, toolName: req.toolName, arguments: req.arguments, batchIndex: req.batchIndex});
+            approvalSpan.close();
+            span.close();
+            return withTrace
+                ? {
+                    id: executionId,
+                    userMessage,
+                    iterations,
+                    tools: self.toolSchemas,
+                    startTime,
+                    endTime: time:utcNow(),
+                    output: pendingApproval,
+                    toolCalls
+                }
+                : pendingApproval;
+        }
+
         do {
             string answer = check getAnswer(executionTrace);
-            log:printDebug("Agent execution completed successfully",
+            log:printDebug(successLogMessage,
                     executionId = executionId,
                     agentId = self.agentId,
                     steps = executionTrace.steps.toString(),
@@ -434,7 +752,7 @@ public isolated distinct class Agent {
             }
             return answer;
         } on fail Error err {
-            log:printDebug("Agent execution failed",
+            log:printDebug(failedLogMessage,
                     err,
                     executionId = executionId,
                     agentId = self.agentId,
@@ -442,8 +760,8 @@ public isolated distinct class Agent {
             );
             span.close(err);
 
-            if td is typedesc<Trace> {
-                return {
+            return withTrace
+                ? {
                     id: executionId,
                     userMessage,
                     iterations,
@@ -452,9 +770,8 @@ public isolated distinct class Agent {
                     endTime: time:utcNow(),
                     output: err,
                     toolCalls
-                };
-            }
-            return err;
+                }
+                : err;
         }
     }
 
@@ -529,6 +846,22 @@ isolated function parseAnswerAsType(string answer, typedesc<anydata> td) returns
                 result);
     }
     return result;
+}
+
+// `history` must contain, in order, a system message followed by a user message before the
+// prefix ends (`run` always appends both - see `agent-utils.bal`), so a valid snapshot has
+// `historyPrefixLength >= 2`. The prefix may equal `history.length()` when the very first tool
+// call proposed is the one that paused, so `<=` (not `<`) is the correct upper bound.
+isolated function isPendingApprovalHistoryValid(PendingApproval pendingApproval) returns boolean {
+    ChatMessage[] history = pendingApproval.history;
+    int historyPrefixLength = pendingApproval.historyPrefixLength;
+    if historyPrefixLength < 2 || historyPrefixLength > history.length() {
+        return false;
+    }
+    // Consumers unchecked-cast these two roles (see agent-utils.bal and the resume path here), so
+    // this single check must also guarantee the roles, not just the bounds - otherwise a snapshot
+    // from a custom store would panic instead of surfacing the "corrupted history" error.
+    return history[0] is ChatSystemMessage && history[historyPrefixLength - 1] is ChatUserMessage;
 }
 
 isolated function getAnswer(ExecutionTrace executionTrace) returns string|Error {

@@ -30,12 +30,15 @@ public class Agent {
     private Agent() {
     }
 
+    // `input` is a `string|Prompt|Resume`: a query starts a new turn, while a `Resume` continues a
+    // run that paused for human approval. `runInternal` dispatches on the input type - there is no
+    // separate resume entry point.
     @SuppressWarnings("unused")
     public static Object run(Environment env, BObject agent,
-                             Object query, BString sessionId, BObject context, BTypedesc td) {
+                             Object input, BString sessionId, BObject context, BTypedesc td) {
         return env.yieldAndRun(() -> {
             try {
-                Object[] paramFeed = new Object[]{query, sessionId, context, td};
+                Object[] paramFeed = new Object[]{input, sessionId, context, td};
                 return env.getRuntime().callMethod(agent, RUN_INTERNAL_METHOD_NAME, null, paramFeed);
             } catch (BError bError) {
                 return ModuleUtils.createError("Unable to obtain valid answer from the agent", bError);

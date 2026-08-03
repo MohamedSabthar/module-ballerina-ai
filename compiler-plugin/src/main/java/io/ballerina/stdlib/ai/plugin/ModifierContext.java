@@ -117,6 +117,7 @@ record ToolAnnotationConfig(
     public static final String DESCRIPTION_FIELD_NAME = "description";
     public static final String PARAMETERS_FIELD_NAME = "parameters";
     public static final String AUTH = "auth";
+    public static final String REQUIRES_APPROVAL_FIELD_NAME = "requiresApproval";
 
     public String get(String field) {
         return switch (field) {
