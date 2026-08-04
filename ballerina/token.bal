@@ -65,17 +65,24 @@ type Code record {
     record {string code;} authData;
 };
 
-isolated function getToolScopes(Credential agentCredential, AgentIdAuthConfig agentIdAuthConfig, 
-    cache:Cache tokenManager, string toolName, Context context) returns 
+// Cache entries are shared across every tool invocation that is handed the same `cache:Cache`
+// instance (e.g. by `ai:authorizeTool` callers outside a single `ai:Agent`). Keying by tool name
+// alone would let a second credential invoking a same-named tool hit a token cached for a
+// *different* credential, so the key must always incorporate the credential identity.
+isolated function tokenCacheKey(string agentId, string toolName) returns string => agentId + ":" + toolName;
+
+isolated function getToolScopes(Credential agentCredential, AgentIdAuthConfig agentIdAuthConfig,
+    cache:Cache tokenManager, string toolName, Context context) returns
     TokenAcquisitionError|InsufficientScopeError|TokenValidationError|map<()>?  {
     string agentId = agentCredential.id;
+    string cacheKey = tokenCacheKey(agentId, toolName);
     boolean needsRefresh = true;
     map<()> scopeInToken = {};
     string|string[]? scopes = agentIdAuthConfig.scopes;
     string baseUrl = agentIdAuthConfig.baseAuthUrl;
     baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() -1) : baseUrl;
-    if tokenManager.hasKey(toolName) {
-        any|error token = tokenManager.get(toolName);
+    if tokenManager.hasKey(cacheKey) {
+        any|error token = tokenManager.get(cacheKey);
         if token is TokenCache {
             needsRefresh = token.isAccessTokenExpired();
             scopeInToken = token.getScopes();
@@ -87,14 +94,14 @@ isolated function getToolScopes(Credential agentCredential, AgentIdAuthConfig ag
                 toolName = toolName,
                 scopes = scopes
         );
-        http:Client|http:ClientError httpclient = new (baseUrl, 
+        http:Client|http:ClientError httpclient = new (baseUrl,
             secureSocket = agentIdAuthConfig.secureSocket);
         if  httpclient is http:ClientError {
             return error TokenAcquisitionError(httpclient.message());
-        }   
-        Token freshToken = check getFreshToken(agentCredential, agentIdAuthConfig, agentId, 
+        }
+        Token freshToken = check getFreshToken(agentCredential, agentIdAuthConfig, agentId,
                 scopes, toolName, httpclient, baseUrl);
-        error|map<()> validateTokenResult = validateToken(toolName, freshToken, tokenManager);
+        error|map<()> validateTokenResult = validateToken(cacheKey, freshToken, tokenManager);
         if validateTokenResult is error {
             return error TokenValidationError(validateTokenResult.message());
         }
@@ -244,16 +251,16 @@ isolated function getToken(string code, string clientId, string redirectUri, str
         {"Content-Type": APPLICATION_X_WWW_FORM_URLENCODED});
 }
 
-isolated function addToken(string toolName, Token token, cache:Cache tokenManager) returns map<()> {
+isolated function addToken(string cacheKey, Token token, cache:Cache tokenManager) returns map<()> {
     TokenCache tokenCache = new (token);
-    cache:Error? output = tokenManager.put(toolName, tokenCache);
+    cache:Error? output = tokenManager.put(cacheKey, tokenCache);
     if output is cache:Error {
-        log:printError("Failed to store token in cache", output, toolName = toolName);
+        log:printError("Failed to store token in cache", output, cacheKey = cacheKey);
     }
     return tokenCache.getScopes();
 }
 
-isolated function validateToken(string toolName, Token token, cache:Cache tokenManager) returns error| map<()> {
+isolated function validateToken(string cacheKey, Token token, cache:Cache tokenManager) returns error| map<()> {
     observe:ValidateTokenSpan validateTokenSpan = observe:createValidateTokenSpan("WSO2");
     jwt:Payload decode = (check jwt:decode(token.access_token))[1];
     [int, decimal] currentTime = time:utcNow();
@@ -262,7 +269,7 @@ isolated function validateToken(string toolName, Token token, cache:Cache tokenM
         token.expires_in = <int>decode["exp"];
         validateTokenSpan.addValidationResult(true, decode["client_id"].toString(), decode?.sub);
         validateTokenSpan.close();
-        return addToken(toolName, token, tokenManager);
+        return addToken(cacheKey, token, tokenManager);
     }
     validateTokenSpan.addValidationResult(false, decode["client_id"].toString(), decode?.sub);
     validateTokenSpan.close();

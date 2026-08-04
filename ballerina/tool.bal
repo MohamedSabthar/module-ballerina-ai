@@ -435,26 +435,68 @@ isolated function validateTool(LlmToolResponse action, Credential? agentCredenti
     );
 }
 
-isolated function authorizeToolInvocation (Credential? agentCredential, cache:Cache tokenManager, 
-    Context context, map<Tool> & readonly tool, string toolName) returns 
+isolated function authorizeToolInvocation (Credential? agentCredential, cache:Cache tokenManager,
+    Context context, map<Tool> & readonly tool, string toolName) returns
     TokenAcquisitionError|TokenValidationError? {
     AgentIdAuthConfig|Scopes? auth = tool.get(toolName).auth;
-    string? agentId = agentCredential is Credential ? agentCredential.id : ();
-    string[]|string? scopes = ();
-    if auth is AgentIdAuthConfig|Scopes {
-        scopes = auth?.scopes;
+    if auth is () {
+        return;
     }
-    if agentCredential is Credential && auth is AgentIdAuthConfig {     
-        map<()>? result = check getToolScopes(agentCredential, auth, tokenManager, toolName, context);
+    return authorizeTool(agentCredential, auth, toolName, context, tokenManager);
+}
+
+# Authorizes an invocation of an `@ai:AgentTool`-annotated function outside the `ai:Agent` run
+# loop - performing the same token acquisition and scope validation the run loop applies for a
+# tool declaring an `auth` requirement, and populating `context` with the acquired access token
+# for the tool body to retrieve via `context:getAccessToken`. Intended for runtimes that execute
+# `@ai:AgentTool` functions via `ai:executeTool` directly (e.g. a durable/workflow agent), which do
+# not go through `ai:Agent` and therefore cannot rely on its built-in enforcement.
+#
+# The `auth` value passed here must be the same value declared on the tool's `@ai:AgentTool`
+# annotation - obtain it via `ai:getToolConfigs` rather than constructing it independently. A
+# mismatched `auth` (e.g. different `scopes`) authorizes the call against the wrong requirement.
+#
+# `tokenManager` is a cache the caller owns and must reuse across invocations of the same tool -
+# passing a freshly created cache on every call defeats caching, forcing a full token
+# acquisition (and re-transmission of `credential.secret` to the authorization server) on every
+# single invocation. A single `tokenManager` may safely be shared across multiple credentials and
+# tools; cache entries are keyed internally by credential and tool name.
+#
+# Authorization populates `context` with a live access token. Callers must ensure `context` (and
+# the token it now holds) never outlives the single tool invocation it was acquired for - in a
+# durable-execution setting in particular, authorization and tool execution must happen within
+# the same activity attempt, since the token must never be persisted to durable/replayable
+# workflow history.
+#
+# + credential - The credential to authenticate with; required when `auth` is an
+# `AgentIdAuthConfig`
+# + auth - The tool's declared authorization requirement, as read from its `@ai:AgentTool`
+# annotation (e.g. via `ai:getToolConfigs`)
+# + toolName - The name of the tool being invoked, used for cache keying and diagnostics
+# + context - The context to populate with the acquired access token on success
+# + tokenManager - A cache the caller owns and reuses across invocations of the same tool, for
+# token caching
+# + return - `TokenAcquisitionError` if a token could not be acquired (including when `auth`
+# requires a `credential` that was not provided), `TokenValidationError` (or its subtype
+# `InsufficientScopeError`) if the acquired token does not satisfy the required scopes, or `()`
+# on success
+public isolated function authorizeTool(Credential? credential, AgentIdAuthConfig|Scopes auth,
+        string toolName, Context context, cache:Cache tokenManager) returns
+        TokenAcquisitionError|TokenValidationError? {
+    string? agentId = credential is Credential ? credential.id : ();
+    string[]|string? scopes = auth?.scopes;
+    if credential is Credential && auth is AgentIdAuthConfig {
+        map<()>? result = check getToolScopes(credential, auth, tokenManager, toolName, context);
         if result is () {
             return;
         }
-        check validateToolScope(result, toolName, scopes, agentCredential.id);
-        any|error token = tokenManager.get(toolName);
+        check validateToolScope(result, toolName, scopes, credential.id);
+        string cacheKey = tokenCacheKey(credential.id, toolName);
+        any|error token = tokenManager.get(cacheKey);
         if token is TokenCache {
             context.setAccessToken(toolName, token.getAccessToken());
         }
-    } else if scopes !is () && (auth !is  AgentIdAuthConfig|| agentCredential is ()) {
+    } else if scopes !is () && (auth !is AgentIdAuthConfig || credential is ()) {
         log:printError("Authorization is required for the tool, but no agent credential " +
             "or auth configuration was provided.", toolName = toolName, agentId = agentId);
         return error TokenAcquisitionError("Authorization is required for the tool, but no agent " +
