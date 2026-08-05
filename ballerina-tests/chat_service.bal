@@ -26,4 +26,10 @@ service /chatService on chatListener {
             message: request.sessionId + ": " + request.message
         };
     }
+
+    resource function post chat/approve(@http:Payload ai:ChatApprovalMessage request) returns ai:ChatRespMessage|error {
+        return {
+            message: request.sessionId + ": " + request.decisions.length().toString() + " decision(s)"
+        };
+    }
 }

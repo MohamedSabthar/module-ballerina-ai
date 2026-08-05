@@ -27,3 +27,17 @@ function testAgentChat() returns error? {
     ai:ChatRespMessage resp = check chatClient->/chat.post(req);
     test:assertEquals(resp.message, "1: Hello Ballerina!", "Invalid response message");
 }
+
+@test:Config {}
+function testAgentChatApprove() returns error? {
+    ai:ChatClient chatClient = check new("http://localhost:9090/chatService");
+    ai:ChatApprovalMessage req = {
+        sessionId: "1",
+        decisions: {
+            "req-1": {decision: ai:APPROVE},
+            "req-2": {decision: ai:REJECT, reason: "not needed"}
+        }
+    };
+    ai:ChatRespMessage resp = check chatClient->/chat/approve.post(req);
+    test:assertEquals(resp.message, "1: 2 decision(s)", "Invalid response message");
+}
