@@ -38,6 +38,6 @@ function testAgentChatApprove() returns error? {
             "req-2": {decision: ai:REJECT, reason: "not needed"}
         }
     };
-    ai:ChatRespMessage resp = check chatClient->/chat/approve.post(req);
+    ai:ChatRespMessage resp = check chatClient->/approval.post(req);
     test:assertEquals(resp.message, "1: 2 decision(s)", "Invalid response message");
 }
