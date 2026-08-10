@@ -33,3 +33,15 @@ service /chatService on chatListener {
         };
     }
 }
+
+// A service whose `chat` resource returns an `ai:ApprovalRequiredError` (as a real agent would when
+// it pauses for approval). The dispatcher inside `ai:Listener` should convert that error into a
+// structured HTTP response carrying the pending requests - the service itself does no mapping.
+service /pausingService on chatListener {
+    resource function post chat(@http:Payload ai:ChatReqMessage request) returns ai:ChatRespMessage|error {
+        return error ai:ApprovalRequiredError("Approval required", requests = [
+            {id: "req-1", sessionId: request.sessionId, toolName: "issueRefund",
+                toolDescription: "Refund an order", arguments: {"amount": 10}, batchIndex: 0}
+        ]);
+    }
+}

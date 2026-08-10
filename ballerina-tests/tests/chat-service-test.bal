@@ -16,6 +16,7 @@
 
 import ballerina/test;
 import ballerina/ai;
+import ballerina/http;
 
 @test:Config {}
 function testAgentChat() returns error? {
@@ -40,4 +41,19 @@ function testAgentChatApprove() returns error? {
     };
     ai:ChatRespMessage resp = check chatClient->/approval.post(req);
     test:assertEquals(resp.message, "1: 2 decision(s)", "Invalid response message");
+}
+
+// Verifies the dispatcher converts a returned `ai:ApprovalRequiredError` into a structured HTTP
+// response (custom status + `{requests: [...]}` body), without the service doing any mapping.
+@test:Config {}
+function testAgentChatApprovalPause() returns error? {
+    http:Client httpClient = check new ("http://localhost:9090");
+    http:Response resp = check httpClient->/pausingService/chat.post({sessionId: "1", message: "refund order"});
+
+    test:assertEquals(resp.statusCode, 422, "Expected the pause to map to HTTP 422");
+    json body = check resp.getJsonPayload();
+    json[] requests = check (check body.requests).ensureType();
+    test:assertEquals(requests.length(), 1, "Expected one pending approval request");
+    test:assertEquals(check requests[0].toolName, "issueRefund", "Wrong tool name in pending request");
+    test:assertEquals(check requests[0].id, "req-1", "Wrong request id in pending request");
 }
