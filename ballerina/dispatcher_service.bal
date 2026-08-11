@@ -42,10 +42,7 @@ isolated service class ChatDispatcherService {
     }
 
     isolated resource function post decision(@http:Payload DecisionMessage request)
-            returns ChatRespMessage|ApprovalRequiredResponse|http:NotFound|error {
-        if !hasDecisionResource(self) {
-            return http:NOT_FOUND;
-        }
+            returns ChatRespMessage|ApprovalRequiredResponse|error {
         return toResponse(invokeDecision(self, request));
     }
 }
