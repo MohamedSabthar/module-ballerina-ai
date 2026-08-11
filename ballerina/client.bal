@@ -38,13 +38,13 @@ public isolated client class ChatClient {
         return self.httpClient->/chat.post(request);
     }
 
-    # Sends a structured approval decision to the chat service, resuming a run that paused for
-    # human approval. Only meaningful against a service that implements `ApprovableChatService`;
-    # a plain `ChatService` has no `approval` resource and returns a 404.
+    # Sends a structured decision to the chat service, resuming a run that paused for human
+    # approval. Only meaningful against a service that has a `decision` resource; a plain
+    # `ChatService` without one returns a 404.
     #
-    # + request - The approval decisions to be sent.
+    # + request - The decisions to be sent.
     # + return - A `ChatRespMessage` containing the response from the chat service, or an `error` if the request fails.
-    isolated resource function post approval(ChatApprovalMessage request) returns ChatRespMessage|error {
-        return self.httpClient->/approval.post(request);
+    isolated resource function post decision(DecisionMessage request) returns ChatRespMessage|error {
+        return self.httpClient->/decision.post(request);
     }
 }

@@ -30,16 +30,16 @@ function testAgentChat() returns error? {
 }
 
 @test:Config {}
-function testAgentChatApprove() returns error? {
+function testAgentChatDecision() returns error? {
     ai:ChatClient chatClient = check new("http://localhost:9090/chatService");
-    ai:ChatApprovalMessage req = {
+    ai:DecisionMessage req = {
         sessionId: "1",
         decisions: {
             "req-1": {decision: ai:APPROVE},
             "req-2": {decision: ai:REJECT, reason: "not needed"}
         }
     };
-    ai:ChatRespMessage resp = check chatClient->/approval.post(req);
+    ai:ChatRespMessage resp = check chatClient->/decision.post(req);
     test:assertEquals(resp.message, "1: 2 decision(s)", "Invalid response message");
 }
 
@@ -50,7 +50,7 @@ function testAgentChatApprovalPause() returns error? {
     http:Client httpClient = check new ("http://localhost:9090");
     http:Response resp = check httpClient->/pausingService/chat.post({sessionId: "1", message: "refund order"});
 
-    test:assertEquals(resp.statusCode, 422, "Expected the pause to map to HTTP 422");
+    test:assertEquals(resp.statusCode, 403, "Expected the pause to map to HTTP 403");
     json body = check resp.getJsonPayload();
     json[] requests = check (check body.requests).ensureType();
     test:assertEquals(requests.length(), 1, "Expected one pending approval request");

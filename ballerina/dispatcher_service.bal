@@ -17,12 +17,12 @@
 import ballerina/http;
 
 # The HTTP response returned when a run pauses for human approval. Carries the pending approval
-# requests in its body so the caller can gather decisions and resume via the `approval` resource.
+# requests in its body so the caller can gather decisions and resume via the `decision` resource.
 #
 # + body - The pending approval requests awaiting a decision
 type ApprovalRequiredResponse record {|
-    *http:UnprocessableEntity;
-    record {| ApprovalRequest[] requests; |} body;
+    *http:Forbidden;
+    record {|ApprovalRequest[] requests;|} body;
 |};
 
 # Internal service attached to the underlying `http:Listener` in place of the user's `ChatService`.
@@ -41,12 +41,12 @@ isolated service class ChatDispatcherService {
         return toResponse(invokeChat(self, request));
     }
 
-    isolated resource function post approval(@http:Payload ChatApprovalMessage request)
+    isolated resource function post decision(@http:Payload DecisionMessage request)
             returns ChatRespMessage|ApprovalRequiredResponse|http:NotFound|error {
-        if !hasApprovalResource(self) {
+        if !hasDecisionResource(self) {
             return http:NOT_FOUND;
         }
-        return toResponse(invokeApproval(self, request));
+        return toResponse(invokeDecision(self, request));
     }
 }
 

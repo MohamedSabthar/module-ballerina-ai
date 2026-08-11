@@ -33,11 +33,11 @@ public type ChatRespMessage record {|
 |};
 
 # Represents a structured decision on the tool call(s) a paused run is awaiting approval for.
-# Sent to a chat service's `approval` resource to resume the run for `sessionId`.
+# Sent to a chat service's `decision` resource to resume the run for `sessionId`.
 #
 # + sessionId - The session whose paused run these decisions apply to
 # + decisions - The human's decisions, keyed by `ApprovalRequest.id`
-public type ChatApprovalMessage record {|
+public type DecisionMessage record {|
     string sessionId;
     map<HumanResponse> decisions;
 |};
@@ -51,16 +51,6 @@ public type ChatClientConfiguration record {|
 public type ChatService distinct service object {
     *http:Service;
     resource function post chat(@http:Payload ChatReqMessage request) returns ChatRespMessage|error;
-};
-
-# Defines a chat service interface that, in addition to `chat`, accepts structured approval
-# decisions on tool call(s) a paused run is awaiting. A superset of `ChatService` - every
-# `ApprovableChatService` is a valid `ChatService`, so it attaches to `ai:Listener` exactly like
-# a plain `ChatService` - so a service opts into structured approval simply by implementing this
-# type instead of `ChatService`.
-public type ApprovableChatService distinct service object {
-    *ChatService;
-    resource function post approval(@http:Payload ChatApprovalMessage request) returns ChatRespMessage|error;
 };
 
 type ExecutionTrace record {|

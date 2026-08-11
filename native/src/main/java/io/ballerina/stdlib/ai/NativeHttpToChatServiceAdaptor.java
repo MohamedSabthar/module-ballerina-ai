@@ -59,19 +59,19 @@ public final class NativeHttpToChatServiceAdaptor {
         return chatService.getNativeData(DISPATCHER);
     }
 
-    // Whether the user's ChatService declares a `post approval` resource (i.e. is an
-    // ApprovableChatService). Used by the dispatcher to 404 the approval path for plain services.
-    public static boolean hasApprovalResource(BObject dispatcher) {
+    // Whether the user's ChatService declares a `post decision` resource. Used by the dispatcher
+    // to 404 the decision path for a service that doesn't have one.
+    public static boolean hasDecisionResource(BObject dispatcher) {
         BObject userService = (BObject) dispatcher.getNativeData(USER_CHAT_SERVICE);
-        return findResource(userService, "approval") != null;
+        return findResource(userService, "decision") != null;
     }
 
     public static Object invokeChat(Environment env, BObject dispatcher, BMap<BString, Object> request) {
         return invokeResource(env, dispatcher, "chat", request);
     }
 
-    public static Object invokeApproval(Environment env, BObject dispatcher, BMap<BString, Object> request) {
-        return invokeResource(env, dispatcher, "approval", request);
+    public static Object invokeDecision(Environment env, BObject dispatcher, BMap<BString, Object> request) {
+        return invokeResource(env, dispatcher, "decision", request);
     }
 
     private static ResourceMethodType findResource(BObject userService, String pathSegment) {

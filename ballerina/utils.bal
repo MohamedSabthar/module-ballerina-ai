@@ -60,9 +60,9 @@ isolated function getDispatcher(ChatService chatService) returns ChatDispatcherS
     'class: "io.ballerina.stdlib.ai.NativeHttpToChatServiceAdaptor"
 } external;
 
-// Whether the attached user service declares a `post approval` resource (i.e. is an
-// `ApprovableChatService`); used to 404 the approval path for a plain `ChatService`.
-isolated function hasApprovalResource(ChatDispatcherService dispatcher) returns boolean = @java:Method {
+// Whether the attached user service declares a `post decision` resource; used to 404 the
+// decision path for a plain `ChatService` that doesn't have one.
+isolated function hasDecisionResource(ChatDispatcherService dispatcher) returns boolean = @java:Method {
     'class: "io.ballerina.stdlib.ai.NativeHttpToChatServiceAdaptor"
 } external;
 
@@ -73,8 +73,8 @@ isolated function invokeChat(ChatDispatcherService dispatcher, ChatReqMessage re
     'class: "io.ballerina.stdlib.ai.NativeHttpToChatServiceAdaptor"
 } external;
 
-// Reflectively invokes the user service's `post approval` resource, returning its result intact.
-isolated function invokeApproval(ChatDispatcherService dispatcher, ChatApprovalMessage request)
+// Reflectively invokes the user service's `post decision` resource, returning its result intact.
+isolated function invokeDecision(ChatDispatcherService dispatcher, DecisionMessage request)
     returns ChatRespMessage|error = @java:Method {
     'class: "io.ballerina.stdlib.ai.NativeHttpToChatServiceAdaptor"
 } external;
