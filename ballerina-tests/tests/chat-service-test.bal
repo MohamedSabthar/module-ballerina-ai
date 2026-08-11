@@ -65,3 +65,31 @@ function testAgentChatApprovalPause() returns error? {
     test:assertEquals(check requests[1].toolName, "cancelOrder", "Wrong tool name in second pending request");
     test:assertEquals(check requests[1].id, "req-2", "Wrong request id in second pending request");
 }
+
+// Verifies the dispatcher maps `ai:ApprovalNotFoundError` (a `Resume` sent for a session with
+// nothing pending) to HTTP 404, with a structured body carrying both a stable `errorType`
+// discriminator and a human-readable `message`.
+@test:Config {}
+function testAgentChatDecisionNoPending() returns error? {
+    http:Client httpClient = check new ("http://localhost:9090");
+    http:Response resp = check httpClient->/pausingService/decision.post({sessionId: "no-pending", decisions: {}});
+    test:assertEquals(resp.statusCode, 404, "Expected ApprovalNotFoundError to map to HTTP 404");
+    json body = check resp.getJsonPayload();
+    test:assertEquals(check body.errorType, "ApprovalNotFoundError", "Wrong errorType in response body");
+    string message = check (check body.message).ensureType();
+    test:assertTrue(message.includes("No pending approval found"), "Expected message to explain why: " + message);
+}
+
+// Verifies the dispatcher maps `ai:UnknownApprovalIdError` (a `Resume` naming an id that isn't
+// pending) to HTTP 400, with a structured body carrying both a stable `errorType`
+// discriminator and a human-readable `message`.
+@test:Config {}
+function testAgentChatDecisionUnknownId() returns error? {
+    http:Client httpClient = check new ("http://localhost:9090");
+    http:Response resp = check httpClient->/pausingService/decision.post({sessionId: "1", decisions: {"bad-id": {decision: ai:APPROVE}}});
+    test:assertEquals(resp.statusCode, 400, "Expected UnknownApprovalIdError to map to HTTP 400");
+    json body = check resp.getJsonPayload();
+    test:assertEquals(check body.errorType, "UnknownApprovalIdError", "Wrong errorType in response body");
+    string message = check (check body.message).ensureType();
+    test:assertTrue(message.includes("Unknown approval id"), "Expected message to explain why: " + message);
+}

@@ -25,6 +25,16 @@ type ApprovalRequiredResponse record {|
     record {|ApprovalRequest[] requests;|} body;
 |};
 
+# The body of a 404/400 response for a `Resume` that could not be applied.
+#
+# + errorType - A stable discriminator a caller can branch on, e.g. `"ApprovalNotFoundError"`
+# + message - Free text for humans; may be reworded independently, so it must not be relied on
+#             for branching
+type ResumeErrorBody record {|
+    string errorType;
+    string message;
+|};
+
 # Internal service attached to the underlying `http:Listener` in place of the user's `ChatService`.
 # For each request it forwards to the matching resource on the user's service (reflectively, via
 # the native adaptor) and turns a paused run (`ApprovalRequiredError`) into an
@@ -37,25 +47,37 @@ isolated service class ChatDispatcherService {
     *http:Service;
 
     isolated resource function post chat(@http:Payload ChatReqMessage request)
-            returns ChatRespMessage|ApprovalRequiredResponse|error {
+            returns ChatRespMessage|ApprovalRequiredResponse|http:NotFound|http:BadRequest|error {
         return toResponse(invokeChat(self, request));
     }
 
     isolated resource function post decision(@http:Payload DecisionMessage request)
-            returns ChatRespMessage|ApprovalRequiredResponse|error {
+            returns ChatRespMessage|ApprovalRequiredResponse|http:NotFound|http:BadRequest|error {
         return toResponse(invokeDecision(self, request));
     }
 }
 
 # Maps a resource result to the wire response: a paused run becomes an `ApprovalRequiredResponse`
-# carrying the pending requests; anything else (a normal answer or a genuine error) passes through.
+# carrying the pending requests; a `Resume` sent for a session with nothing pending, or naming an
+# id that isn't pending, maps to 404/400 respectively; anything else (a normal answer or a genuine
+# error) passes through.
 #
 # + result - The result returned by the user service's resource
-# + return - The `ChatRespMessage`, an `ApprovalRequiredResponse` for a pause, or the original error
+# + return - The mapped response for a pause or a resume mismatch, the `ChatRespMessage`, or the
+#            original error
 isolated function toResponse(ChatRespMessage|error result)
-        returns ChatRespMessage|ApprovalRequiredResponse|error {
+        returns ChatRespMessage|ApprovalRequiredResponse|http:NotFound|http:BadRequest|error {
     if result is ApprovalRequiredError {
-        return {body: {requests: result.detail().requests}};
+        ApprovalRequiredResponse response = {body: {requests: result.detail().requests}};
+        return response;
+    }
+    if result is ApprovalNotFoundError {
+        http:NotFound response = {body: {errorType: "ApprovalNotFoundError", message: result.message()}};
+        return response;
+    }
+    if result is UnknownApprovalIdError {
+        http:BadRequest response = {body: {errorType: "UnknownApprovalIdError", message: result.message()}};
+        return response;
     }
     return result;
 }

@@ -54,4 +54,13 @@ service /pausingService on chatListener {
                 toolDescription: "Cancel an order", arguments: {"orderId": "ORD-1"}, batchIndex: 1}
         ]);
     }
+
+    // Simulates the two resume-mismatch errors `ai:Agent.run()` raises for a `Resume`, keyed by
+    // sessionId so a single resource can exercise both, without needing a real paused agent.
+    resource function post decision(@http:Payload ai:DecisionMessage request) returns ai:ChatRespMessage|error {
+        if request.sessionId == "no-pending" {
+            return error ai:ApprovalNotFoundError("No pending approval found for session '" + request.sessionId + "'.");
+        }
+        return error ai:UnknownApprovalIdError("Unknown approval id for session '" + request.sessionId + "'.");
+    }
 }
