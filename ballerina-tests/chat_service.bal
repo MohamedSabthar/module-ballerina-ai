@@ -27,9 +27,15 @@ service /chatService on chatListener {
         };
     }
 
+    // Echoes the received decisions verbatim (keys, decision, and reason), rather than just a
+    // count, so tests can verify the `ApprovalRequest.id`-keyed contract survives the round trip.
     resource function post decision(@http:Payload ai:DecisionMessage request) returns ai:ChatRespMessage|error {
+        string[] parts = [];
+        foreach [string, ai:HumanResponse] [id, response] in request.decisions.entries() {
+            parts.push(id + "=" + response.decision.toString() + (response?.reason ?: ""));
+        }
         return {
-            message: request.sessionId + ": " + request.decisions.length().toString() + " decision(s)"
+            message: request.sessionId + ": " + string:'join(",", ...parts)
         };
     }
 }
@@ -37,11 +43,15 @@ service /chatService on chatListener {
 // A service whose `chat` resource returns an `ai:ApprovalRequiredError` (as a real agent would when
 // it pauses for approval). The dispatcher inside `ai:Listener` should convert that error into a
 // structured HTTP response carrying the pending requests - the service itself does no mapping.
+// Two pending requests are returned, so tests can verify the dispatcher preserves a full batch
+// rather than only the first entry.
 service /pausingService on chatListener {
     resource function post chat(@http:Payload ai:ChatReqMessage request) returns ai:ChatRespMessage|error {
         return error ai:ApprovalRequiredError("Approval required", requests = [
             {id: "req-1", sessionId: request.sessionId, toolName: "issueRefund",
-                toolDescription: "Refund an order", arguments: {"amount": 10}, batchIndex: 0}
+                toolDescription: "Refund an order", arguments: {"amount": 10}, batchIndex: 0},
+            {id: "req-2", sessionId: request.sessionId, toolName: "cancelOrder",
+                toolDescription: "Cancel an order", arguments: {"orderId": "ORD-1"}, batchIndex: 1}
         ]);
     }
 }

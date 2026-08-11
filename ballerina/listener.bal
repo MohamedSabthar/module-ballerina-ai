@@ -33,8 +33,8 @@ public class Listener {
         // responses without the user writing any conversion logic. The dispatcher forwards each
         // request to the user's service; the two are associated as native data.
         ChatDispatcherService dispatcher = new;
-        setChatService(dispatcher, chatService);
         check self.httpListener.attach(dispatcher, name);
+        setChatService(dispatcher, chatService);
     }
 
     public isolated function detach(ChatService chatService) returns error? {
