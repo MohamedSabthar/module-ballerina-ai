@@ -25,13 +25,16 @@ type ApprovalRequiredResponse record {|
     record {|ApprovalRequest[] requests;|} body;
 |};
 
+# A stable discriminator a caller can branch on for a `Resume` that could not be applied.
+type ResumeErrorType "ApprovalNotFoundError"|"UnknownApprovalIdError";
+
 # The body of a 404/400 response for a `Resume` that could not be applied.
 #
-# + errorType - A stable discriminator a caller can branch on, e.g. `"ApprovalNotFoundError"`
+# + errorType - A stable discriminator a caller can branch on
 # + message - Free text for humans; may be reworded independently, so it must not be relied on
 #             for branching
 type ResumeErrorBody record {|
-    string errorType;
+    ResumeErrorType errorType;
     string message;
 |};
 
@@ -72,11 +75,13 @@ isolated function toResponse(ChatRespMessage|error result)
         return response;
     }
     if result is ApprovalNotFoundError {
-        http:NotFound response = {body: {errorType: "ApprovalNotFoundError", message: result.message()}};
+        ResumeErrorBody body = {errorType: "ApprovalNotFoundError", message: result.message()};
+        http:NotFound response = {body};
         return response;
     }
     if result is UnknownApprovalIdError {
-        http:BadRequest response = {body: {errorType: "UnknownApprovalIdError", message: result.message()}};
+        ResumeErrorBody body = {errorType: "UnknownApprovalIdError", message: result.message()};
+        http:BadRequest response = {body};
         return response;
     }
     return result;
