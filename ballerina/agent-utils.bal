@@ -436,6 +436,11 @@ isolated function executeToolCall(Agent agent, FunctionCall llmResponse, Context
     }
     boolean isMcpTool = toolStore.isMcpTool(toolName);
     span.addType(isMcpTool ? observe:EXTENTION : observe:FUNCTION);
+    string? toolKitName = toolStore.getToolKitName(toolName);
+    if toolKitName is string {
+        span.addToolKitName(toolKitName);
+    }
+    
     span.addArguments(llmResponse.arguments);
     ToolNotFoundError|ToolInvalidInputError|TokenAcquisitionError|TokenValidationError?
                 validateRes = validateTool(llmResponse, agent.agentCredential,

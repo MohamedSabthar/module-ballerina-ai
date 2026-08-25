@@ -273,3 +273,13 @@ isolated function testToolPanic(string data) returns string {
     error e = error(data);
     panic (e);
 }
+
+@AgentTool {name: "duplicateTool", description: "first tool registered under a duplicate name"}
+isolated function duplicateToolOne(string a) returns string {
+    return a;
+}
+
+@AgentTool {name: "duplicateTool", description: "second tool registered under a duplicate name"}
+isolated function duplicateToolTwo(string a) returns string {
+    return a;
+}
