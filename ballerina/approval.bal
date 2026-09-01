@@ -60,7 +60,22 @@ public type HumanResponse record {|
 public type Resume record {|
     # The human's decisions on the pending tool calls, keyed by `ApprovalRequest.id`
     map<HumanResponse> decisions;
+    # Marks this record as a resume input rather than a new query
+    ResumeTag tag = new;
 |};
+
+# Marks a value as the input that resumes a previously interrupted agent run,
+# carrying the response supplied for the pending interrupt.
+public distinct readonly class ResumeTag {
+    *Tag;
+}
+
+# Represents a marker type used to distinguish agent input/output response types.
+# Types that include this object can be identified as specific data records
+# rather than plain `anydata`.
+public type Tag distinct object {
+};
+
 
 # Determines whether a tool call requires human approval. `true`/`false` gates the tool
 # unconditionally; a function decides per call from the proposed arguments.
