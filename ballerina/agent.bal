@@ -169,7 +169,7 @@ public type DependentlyTypedAgent distinct isolated object {
     # + context - The additional context that can be used during agent tool execution
     # + td - Type descriptor specifying the expected return type format
     # + return - The agent's response bound to `td`, or an `Error`
-    public isolated function run(@display {label: "Query"} string|Prompt|Resume query,
+    public isolated function run(@display {label: "Query"} anydata|Prompt|Resume query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new,
             typedesc<Trace|anydata> td = <>) returns td|Error;
@@ -413,70 +413,75 @@ public isolated distinct class Agent {
         if query is Resume {
             return self.resumeInternal(sessionId, query.decisions, context, td);
         }
-        // A prior call on this session may still be awaiting a human decision. Starting a
-        // fresh run regardless would silently orphan that pending approval (and, if this new
-        // run also happens to pause, `checkpointer.put` would overwrite it outright) - so
-        // check first, rather than let a new, unrelated turn interleave with an unresolved one.
-        PendingApproval?|Error existingApprovalResult = self.checkpointer.getCheckpoint(sessionId);
-        if existingApprovalResult is Error {
-            // Trace this earliest guard failure too, matching how `resumeInternal` opens its span
-            // before its own guards - otherwise a checkpoint-store failure here goes unobserved.
-            observe:InvokeAgentSpan errorSpan = observe:createInvokeAgentSpan(self.systemPrompt.role);
-            errorSpan.addId(self.uniqueId);
-            errorSpan.addSessionId(sessionId);
-            errorSpan.close(existingApprovalResult);
-            return existingApprovalResult;
-        }
-        if existingApprovalResult is PendingApproval {
-            if !isPendingApprovalHistoryValid(existingApprovalResult) {
-                log:printWarn("Clearing a corrupted pending approval to allow a new run", sessionId = sessionId);
-                Error? removeErr = self.checkpointer.removeCheckpoint(sessionId);
-                if removeErr is Error {
-                    log:printError("Failed to remove the corrupted pending approval", removeErr, sessionId = sessionId);
+
+        // type narrowing doesn't work here
+        if query is anydata|Prompt {
+            // A prior call on this session may still be awaiting a human decision. Starting a
+            // fresh run regardless would silently orphan that pending approval (and, if this new
+            // run also happens to pause, `checkpointer.put` would overwrite it outright) - so
+            // check first, rather than let a new, unrelated turn interleave with an unresolved one.
+            PendingApproval?|Error existingApprovalResult = self.checkpointer.getCheckpoint(sessionId);
+            if existingApprovalResult is Error {
+                // Trace this earliest guard failure too, matching how `resumeInternal` opens its span
+                // before its own guards - otherwise a checkpoint-store failure here goes unobserved.
+                observe:InvokeAgentSpan errorSpan = observe:createInvokeAgentSpan(self.systemPrompt.role);
+                errorSpan.addId(self.uniqueId);
+                errorSpan.addSessionId(sessionId);
+                errorSpan.close(existingApprovalResult);
+                return existingApprovalResult;
+            }
+            if existingApprovalResult is PendingApproval {
+                if !isPendingApprovalHistoryValid(existingApprovalResult) {
+                    log:printWarn("Clearing a corrupted pending approval to allow a new run", sessionId = sessionId);
+                    Error? removeErr = self.checkpointer.removeCheckpoint(sessionId);
+                    if removeErr is Error {
+                        log:printError("Failed to remove the corrupted pending approval", removeErr, sessionId = sessionId);
+                    }
+                    // Fall through - proceed with a fresh run below.
+                } else {
+                    return self.buildPendingApprovalTrace(existingApprovalResult, td, toString(query));
                 }
-                // Fall through - proceed with a fresh run below.
-            } else {
-                return self.buildPendingApprovalTrace(existingApprovalResult, td, toString(query));
             }
-        }
 
-        time:Utc startTime = time:utcNow();
-        string executionId = uuid:createRandomUuid();
-        string queryString = toString(query);
-        log:printDebug("Agent execution started",
-                executionId = executionId,
-                agentId = self.agentId,
-                query = queryString,
-                sessionId = sessionId
-        );
+            time:Utc startTime = time:utcNow();
+            string executionId = uuid:createRandomUuid();
+            string queryString = toString(query);
+            log:printDebug("Agent execution started",
+                    executionId = executionId,
+                    agentId = self.agentId,
+                    query = queryString,
+                    sessionId = sessionId
+            );
 
-        observe:InvokeAgentSpan span = observe:createInvokeAgentSpan(self.systemPrompt.role);
-        span.addId(self.uniqueId);
-        span.addSessionId(sessionId);
-        span.addInput(queryString);
-        string systemPrompt = getFomatedSystemPrompt(self.systemPrompt);
+            observe:InvokeAgentSpan span = observe:createInvokeAgentSpan(self.systemPrompt.role);
+            span.addId(self.uniqueId);
+            span.addSessionId(sessionId);
+            span.addInput(queryString);
+            string systemPrompt = getFomatedSystemPrompt(self.systemPrompt);
 
-        ResponseSchema? responseSchema = ();
-        if td !is typedesc<string|Trace> && td is typedesc<anydata> {
-            ResponseSchema|Error schema = getResponseSchemaForType(td);
-            if schema is Error {
-                span.close(schema);
-                return schema;
+            ResponseSchema? responseSchema = ();
+            if td !is typedesc<string|Trace> && td is typedesc<anydata> {
+                ResponseSchema|Error schema = getResponseSchemaForType(td);
+                if schema is Error {
+                    span.close(schema);
+                    return schema;
+                }
+                responseSchema = schema;
+                systemPrompt += getStructuredOutputInstruction();
             }
-            responseSchema = schema;
-            systemPrompt += getStructuredOutputInstruction();
+            span.addSystemInstruction(systemPrompt);
+            string|Prompt queryValue = query is Prompt ? query : query.toString();
+            Credential? & readonly agentCredential = self.agentCredential;
+            string? agentId = agentCredential is Credential ? agentCredential.id : ();
+            ExecutionTrace executionTrace = run(self, systemPrompt, queryValue, self.maxIter, self.verbose, agentId,
+                sessionId, context, executionId, startTime, responseSchema);
+            ChatUserMessage userMessage = {role: USER, content: queryValue};
+            return self.buildOutcome(executionId, userMessage, executionTrace, startTime, td, span, sessionId,
+                "Agent execution paused pending human approval",
+                "Agent execution completed successfully",
+                "Agent execution failed");
         }
-        span.addSystemInstruction(systemPrompt);
-
-        Credential? & readonly agentCredential = self.agentCredential;
-        string? agentId = agentCredential is Credential ? agentCredential.id : ();
-        ExecutionTrace executionTrace = run(self, systemPrompt, query, self.maxIter, self.verbose, agentId,
-            sessionId, context, executionId, startTime, responseSchema);
-        ChatUserMessage userMessage = {role: USER, content: query};
-        return self.buildOutcome(executionId, userMessage, executionTrace, startTime, td, span, sessionId,
-            "Agent execution paused pending human approval",
-            "Agent execution completed successfully",
-            "Agent execution failed");
+        return error("Agent execution failed");
     }
 
     # Builds the `ApprovalRequiredError`/`Trace` for a still-live pending approval, without

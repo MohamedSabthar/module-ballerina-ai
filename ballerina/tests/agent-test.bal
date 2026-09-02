@@ -163,6 +163,26 @@ function testAgentRecoversFromBadlyFormattedHistoryWithoutCorruptingMemory() ret
     test:assertEquals(thirdResult, "third turn answer");
 }
 
+type WeatherQuery record {|
+    string city;
+|};
+
+@test:Config
+function testAgentRunAcceptsRecordAsAnydataInput() returns error? {
+    ModelProvider scriptedModel = new ScriptedMockLLM();
+    Agent agent = check new ({
+        systemPrompt: {role: "Test Agent", instructions: "Answer the questions"},
+        model: scriptedModel,
+        tools: [searchTool, calculatorTool]
+    });
+
+    // A record (anydata, not just `string`/`Prompt`) is accepted directly as the query - the
+    // agent stringifies it before sending it to the model.
+    WeatherQuery query = {city: "Colombo"};
+    string result = check agent.run(query);
+    test:assertEquals(result, "The weather in Colombo is sunny");
+}
+
 @test:Config
 function testAgentRunExecutesMultipleToolCallsFromSingleLlmResponseTogether() returns error? {
     MultiToolCallMockLLM scriptedModel = new;
