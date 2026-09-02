@@ -76,7 +76,7 @@ function newHitlTestAgent() returns Agent|error =>
 // many of them will need approval. This builds that single-entry `Resume` for tests that only
 // ever have exactly one gated call pending.
 function singleResume(ApprovalRequiredError pending, HumanResponse response) returns Resume =>
-    {decisions: {[pending.detail().requests[0].id]: response}};
+    {decisions: {[pending.detail().requests[0].id]: response}, tag: new ()};
 
 @test:Config
 function testHumanInTheLoopPauseCarriesTheProposedCall() returns error? {
