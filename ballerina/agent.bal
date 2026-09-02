@@ -398,14 +398,14 @@ public isolated distinct class Agent {
     # + context - The additional context that can be used during agent tool execution
     # + td - Type descriptor specifying the expected return type format
     # + return - The agent's response or an error
-    public isolated function run(@display {label: "Query"} string|Prompt|Resume query,
+    public isolated function run(@display {label: "Query"} anydata|Prompt|Resume query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new,
             typedesc<Trace|anydata> td = <>) returns td|Error = @java:Method {
         'class: "io.ballerina.stdlib.ai.Agent"
     } external;
 
-    private isolated function runInternal(@display {label: "Query"} string|Prompt|Resume query,
+    private isolated function runInternal(@display {label: "Query"} anydata|Prompt|Resume query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new, typedesc<Trace|anydata> td = string) returns Trace|anydata|Error {
         // A `Resume` input continues a run that paused for human approval instead of starting a
