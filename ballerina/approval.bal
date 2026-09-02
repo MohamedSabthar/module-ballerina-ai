@@ -58,8 +58,8 @@ public type HumanResponse record {|
 # whatever isn't supplied stays pending, and `run` returns a fresh `ApprovalRequiredError` listing
 # just the still-undecided requests.
 public type Resume record {|
-    # The human's decisions on the pending tool calls, keyed by `ApprovalRequest.id`
-    map<HumanResponse> decisions;
+    # The human's response on the pending tool calls, keyed by `ApprovalRequest.id`
+    map<HumanResponse> responses;
     # Marks this record as a resume input rather than a new query
     ResumeTag tag = new;
 |};
