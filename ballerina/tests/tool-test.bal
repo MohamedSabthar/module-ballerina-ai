@@ -345,6 +345,36 @@ function testMcpToolMetadataTracking() returns error? {
     test:assertFalse(toolStore.isMcpTool("regularTool"));
 }
 
+isolated class DottedNameMcpToolKit {
+    *McpBaseToolKit;
+
+    public isolated function getTools() returns ToolConfig[] {
+        return [
+            {
+                name: "admin.tools.list",
+                description: "an mcp tool whose name contains dots, which are valid per the MCP spec",
+                caller: testTool
+            }
+        ];
+    }
+}
+
+@test:Config
+isolated function testMcpToolMetadataTrackingUsesSanitizedName() returns error? {
+    DottedNameMcpToolKit dottedNameMcpToolKit = new;
+    ToolStore toolStore = check new (dottedNameMcpToolKit);
+
+    // Tool names are sanitized (dots replaced with underscores) during registration, so the
+    // toolkit/mcp metadata maps must be keyed by the sanitized name to stay consistent with
+    // the tool name the LLM is actually given.
+    test:assertTrue(toolStore.tools.hasKey("admin_tools_list"));
+    test:assertTrue(toolStore.isMcpTool("admin_tools_list"));
+    test:assertTrue(toolStore.getToolKitName("admin_tools_list").toString().includes("DottedNameMcpToolKit"));
+
+    test:assertFalse(toolStore.isMcpTool("admin.tools.list"));
+    test:assertEquals(toolStore.getToolKitName("admin.tools.list"), ());
+}
+
 @test:Config
 isolated function testToolExecutionWithEmptyQueryRecordParam() returns error? {
     HttpTool httpGet =

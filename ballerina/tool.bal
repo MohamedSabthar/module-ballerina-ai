@@ -81,14 +81,16 @@ public isolated class ToolStore {
             } else if tool is BaseToolKit {
                 ToolConfig[] toolsFromToolKit = tool.getTools(); // TODO remove this after Ballerina fixes nullpointer exception
                 foreach ToolConfig toolFromToolKit in toolsFromToolKit {
+                    string sanitizedName = sanitizeToolName(toolFromToolKit.name);
                     lock {
-                        self.toolToToolKitMap[toolFromToolKit.name] = (typeof tool).toString();
+                        self.toolToToolKitMap[sanitizedName] = (typeof tool).toString();
                     }
                 }
                 if tool is McpBaseToolKit {
                     foreach ToolConfig element in toolsFromToolKit {
+                        string sanitizedName = sanitizeToolName(element.name);
                         lock {
-                            self.mcpTools[element.name] = ();
+                            self.mcpTools[sanitizedName] = ();
                         }
                     }
                 }
@@ -302,6 +304,17 @@ isolated function getInputArgumentsOfTool(FunctionTool tool, map<json> inputValu
     return [context, ...orderedArgs.cloneReadOnly()];
 }
 
+isolated function sanitizeToolName(string name) returns string {
+    if name.matches(re `^[a-zA-Z0-9_-]{1,64}$`) {
+        return name;
+    }
+    string sanitizedName = name;
+    if sanitizedName.length() > 64 {
+        sanitizedName = sanitizedName.substring(0, 64);
+    }
+    return regexp:replaceAll(re `[^a-zA-Z0-9_-]`, sanitizedName, "_");
+}
+
 isolated function registerTool(map<Tool & readonly> toolMap, ToolConfig[] tools) returns Error? {
     foreach ToolConfig tool in tools {
         string name = tool.name;
@@ -310,10 +323,7 @@ isolated function registerTool(map<Tool & readonly> toolMap, ToolConfig[] tools)
         }
         if !name.matches(re `^[a-zA-Z0-9_-]{1,64}$`) {
             log:printWarn(string `Tool name '${name}' contains invalid characters. Only alphanumeric, underscore and hyphen are allowed.`);
-            if name.length() > 64 {
-                name = name.substring(0, 64);
-            }
-            name = regexp:replaceAll(re `[^a-zA-Z0-9_-]`, name, "_");
+            name = sanitizeToolName(name);
         }
         if toolMap.hasKey(name) {
             log:printDebug("Duplicate tool name detected",
