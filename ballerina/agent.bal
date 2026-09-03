@@ -411,7 +411,7 @@ public isolated distinct class Agent {
         // A `Resume` input continues a run that paused for human approval instead of starting a
         // new turn; the input type is the sole discriminator between the two.
         if query is Resume {
-            return self.resumeInternal(sessionId, query.decisions, context, td);
+            return self.resumeInternal(sessionId, query.responses, context, td);
         }
 
         // A prior call on this session may still be awaiting a human decision. Starting a

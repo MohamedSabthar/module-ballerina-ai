@@ -31,7 +31,7 @@ service /chatService on chatListener {
     // count, so tests can verify the `ApprovalRequest.id`-keyed contract survives the round trip.
     resource function post decision(@http:Payload ai:DecisionMessage request) returns ai:ChatRespMessage|error {
         string[] parts = [];
-        foreach [string, ai:HumanResponse] [id, response] in request.decisions.entries() {
+        foreach [string, ai:HumanResponse] [id, response] in request.responses.entries() {
             parts.push(id + "=" + response.decision.toString() + (response?.reason ?: ""));
         }
         return {

@@ -36,10 +36,10 @@ public type ChatRespMessage record {|
 # Sent to a chat service's `decision` resource to resume the run for `sessionId`.
 #
 # + sessionId - The session whose paused run these decisions apply to
-# + decisions - The human's decisions, keyed by `ApprovalRequest.id`
+# + responses - The human's decisions, keyed by `ApprovalRequest.id`
 public type DecisionMessage record {|
     string sessionId;
-    map<HumanResponse> decisions;
+    map<HumanResponse> responses;
 |};
 
 # Represents the configuration for a chat client.

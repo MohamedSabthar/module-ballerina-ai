@@ -52,14 +52,14 @@ public type HumanResponse record {|
 
 # Resumes a run that paused for human approval, carrying the human's decisions. Passed as the
 # input to `Agent.run` (in place of a query) to continue a paused run rather than start a new one;
-# `run` distinguishes the two by the input type. `decisions` is keyed by each request's
+# `run` distinguishes the two by the input type. `responses` is keyed by each request's
 # `ApprovalRequest.id` - always a map, even for a single pending call, since a turn may propose
 # several gated calls. A partial map (fewer entries than there are pending requests) is fine:
 # whatever isn't supplied stays pending, and `run` returns a fresh `ApprovalRequiredError` listing
 # just the still-undecided requests.
 public type Resume readonly & record {|
     # The human's decisions on the pending tool calls, keyed by `ApprovalRequest.id`
-    map<HumanResponse> decisions;
+    map<HumanResponse> responses;
     # Marks this record as a resume input rather than a new query
     ResumeTag tag = new;
 |};

@@ -76,7 +76,7 @@ function newHitlTestAgent() returns Agent|error =>
 // many of them will need approval. This builds that single-entry `Resume` for tests that only
 // ever have exactly one gated call pending.
 function singleResume(ApprovalRequiredError pending, HumanResponse response) returns Resume =>
-    {decisions: {[pending.detail().requests[0].id]: response.cloneReadOnly()}, tag: new ()};
+    {responses: {[pending.detail().requests[0].id]: response.cloneReadOnly()}, tag: new ()};
 
 @test:Config
 function testHumanInTheLoopPauseCarriesTheProposedCall() returns error? {
@@ -196,7 +196,7 @@ function testHumanInTheLoopRejectDoesNotExecuteTheTool() returns error? {
 @test:Config
 function testResumeWithoutPendingApprovalFails() returns error? {
     Agent agent = check newHitlTestAgent();
-    Resume resume = {decisions: {"any-id": {decision: APPROVE}}};
+    Resume resume = {responses: {"any-id": {decision: APPROVE}}};
     string|Error resumed = agent.run(resume, "no-such-hitl-session");
     test:assertTrue(resumed is ApprovalNotFoundError);
 }
@@ -216,7 +216,7 @@ function testHumanInTheLoopMergesTraceAcrossPause() returns error? {
         ChatAssistantMessage|Error pausedOutput = pausedTrace.output;
         Resume decision = pausedOutput is ApprovalRequiredError
             ? singleResume(pausedOutput, {decision: APPROVE})
-            : {decisions: {}};
+            : {responses: {}};
         Trace|Error resumedTrace = agent.run(decision, sessionId, td = Trace);
         test:assertTrue(resumedTrace is Trace);
         if resumedTrace is Trace {
@@ -468,7 +468,7 @@ function testHumanInTheLoopTwoGatesInOneBatchSurfacedTogether() returns error? {
             [requests[0].id]: {decision: APPROVE},
             [requests[1].id]: {decision: APPROVE}
         };
-        Resume resume = {decisions};
+        Resume resume = {responses: decisions};
         string|Error resumed = agent.run(resume, sessionId);
         test:assertTrue(resumed is string);
         if resumed is string {
@@ -498,7 +498,7 @@ function testHumanInTheLoopPartialBulkResumeLeavesRestPending() returns error? {
         // Deciding only the first of the two pending requests leaves the second one pending,
         // rather than requiring every decision to arrive in the same resume.
         map<HumanResponse> & readonly firstDecision = {[requests[0].id]: {decision: APPROVE}};
-        string|Error resumedOnce = agent.run({decisions: firstDecision, tag: new ResumeTag()}, sessionId);
+        string|Error resumedOnce = agent.run({responses: firstDecision, tag: new ResumeTag()}, sessionId);
         test:assertTrue(resumedOnce is ApprovalRequiredError);
         if resumedOnce is ApprovalRequiredError {
             ApprovalRequest[] stillPending = resumedOnce.detail().requests;
@@ -515,7 +515,7 @@ function testHumanInTheLoopPartialBulkResumeLeavesRestPending() returns error? {
         }
 
         map<HumanResponse> & readonly secondDecision = {[requests[1].id]: {decision: APPROVE}};
-        string|Error resumedTwice = agent.run({decisions: secondDecision, tag: new ResumeTag()}, sessionId);
+        string|Error resumedTwice = agent.run({responses: secondDecision, tag: new ResumeTag()}, sessionId);
         test:assertTrue(resumedTwice is string);
         if resumedTwice is string {
             test:assertEquals(resumedTwice, "Done: 2 refunds");
@@ -564,7 +564,7 @@ function testHumanInTheLoopPreservesParallelismForSafeCallsInGatedBatch() return
         foreach ApprovalRequest req in requests {
             decisions[req.id] = {decision: APPROVE};
         }
-        Resume resume = {decisions: decisions.cloneReadOnly()};
+        Resume resume = {responses: decisions.cloneReadOnly()};
         answer = agent.run(resume, sessionId);
     }
     test:assertTrue(answer is string);
@@ -792,7 +792,7 @@ function testResumeFailsFastOnCorruptedHistory() returns error? {
 
     // The corrupted-history check happens before id validation, so the id supplied here
     // doesn't matter.
-    Resume resume = {decisions: {"any-id": {decision: APPROVE}}};
+    Resume resume = {responses: {"any-id": {decision: APPROVE}}};
     string|Error resumed = agent.run(resume, sessionId);
     test:assertTrue(resumed is Error);
     test:assertFalse(resumed is ApprovalNotFoundError);
@@ -834,7 +834,7 @@ function testResumeWithUnknownApprovalIdFailsAndRestoresState() returns error? {
     string|Error result = agent.run("Refund order ORD-1", sessionId);
     test:assertTrue(result is ApprovalRequiredError);
 
-    Resume resume = {decisions: {"not-a-real-id": {decision: APPROVE}}};
+    Resume resume = {responses: {"not-a-real-id": {decision: APPROVE}}};
     string|Error resumed = agent.run(resume, sessionId);
     test:assertTrue(resumed is UnknownApprovalIdError);
 
@@ -842,7 +842,7 @@ function testResumeWithUnknownApprovalIdFailsAndRestoresState() returns error? {
     // resume, using the real id, can still succeed afterward.
     if result is ApprovalRequiredError {
         map<HumanResponse> & readonly correctedDecisions = {[result.detail().requests[0].id]: {decision: APPROVE}};
-        string|Error resolved = agent.run({decisions: correctedDecisions, tag: new ResumeTag()}, sessionId);
+        string|Error resolved = agent.run({responses: correctedDecisions, tag: new ResumeTag()}, sessionId);
         test:assertTrue(resolved is string);
         if resolved is string {
             test:assertTrue(resolved.includes("Refunded 50.0 for ORD-1"), resolved);
