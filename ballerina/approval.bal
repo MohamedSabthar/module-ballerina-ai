@@ -57,7 +57,7 @@ public type HumanResponse record {|
 # several gated calls. A partial map (fewer entries than there are pending requests) is fine:
 # whatever isn't supplied stays pending, and `run` returns a fresh `ApprovalRequiredError` listing
 # just the still-undecided requests.
-public type Resume record {|
+public type Resume readonly & record {|
     # The human's decisions on the pending tool calls, keyed by `ApprovalRequest.id`
     map<HumanResponse> decisions;
     # Marks this record as a resume input rather than a new query

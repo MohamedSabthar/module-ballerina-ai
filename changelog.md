@@ -6,7 +6,10 @@ This file documents all significant changes made to the Ballerina AI package acr
 
 ### Added
 - [Add Support for `anydata` Input in Agent](https://github.com/wso2/product-integrator/issues/2300)
-- [Add `Tag` Marker Type and Mark `Resume` Distinct from `anydata`](https://github.com/wso2/product-integrator/issues/2300)
+- [Add `Tag` Marker Type](https://github.com/wso2/product-integrator/issues/2300)
+
+### Changed
+- **Breaking:** `Resume` (a closed record) now has an additional `tag` field to distinguish it from an `anydata` query, and is now a `readonly` record, so `decisions` must be passed as a `readonly` `map<HumanResponse>`. ([wso2/product-integrator#2300](https://github.com/wso2/product-integrator/issues/2300))
 
 ## [1.14.1] - 2026-08-25
 
