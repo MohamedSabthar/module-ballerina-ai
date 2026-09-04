@@ -16,7 +16,7 @@ This file documents all significant changes made to the Ballerina AI package acr
 ### Fixed
 - [Fix Empty Module `init` Function Generated for Modules That Define Only an Agent Class or an Agent Tool](https://github.com/ballerina-platform/ballerina-library/issues/9098)
 
-## [1.14.0] - 2026-08-01
+## [1.14.0] - 2026-08-14
 
 ### Added
 - [Add Agent Configuration to Execute Tool Calls in Parallel](https://github.com/wso2/product-integrator/issues/1856)

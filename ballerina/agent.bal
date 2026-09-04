@@ -160,11 +160,11 @@ public type AgentMetadataConfig record {|
 public type DependentlyTypedAgent distinct isolated object {
     # Executes the agent for the given query and binds the result to the inferred return type.
     #
-    # Pass a `string`/`Prompt` to start a new turn, or a `Resume` (the human's decisions on a
+    # Pass a `anydata`/`Prompt` to start a new turn, or a `Resume` (the human's decisions on a
     # previously paused run) to continue a run that paused for human approval. The input type is
     # what distinguishes the two - there is no separate resume operation.
     #
-    # + query - A query to start a new turn (`string`/`Prompt`), or a `Resume` to continue a paused run
+    # + query - A query to start a new turn (`anydata`/`Prompt`), or a `Resume` to continue a paused run
     # + sessionId - The ID associated with the agent memory
     # + context - The additional context that can be used during agent tool execution
     # + td - Type descriptor specifying the expected return type format
@@ -385,7 +385,7 @@ public isolated distinct class Agent {
 
     # Executes the agent for a given query.
     #
-    # Pass a `string`/`Prompt` to start a new turn, or a `Resume` (the human's decisions on a
+    # Pass a `anydata`/`Prompt` to start a new turn, or a `Resume` (the human's decisions on a
     # previously paused run) to continue a run that paused for human approval on this session. The
     # input type is what distinguishes a fresh turn from a resume - there is no separate resume
     # operation. A `Resume` for a session with no pending approval fails with `ApprovalNotFoundError`.
