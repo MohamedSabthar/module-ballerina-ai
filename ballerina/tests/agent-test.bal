@@ -184,6 +184,25 @@ function testAgentRunAcceptsRecordAsAnydataInput() returns error? {
 }
 
 @test:Config
+function testAgentRunRejectsNilQuery() returns error? {
+    ModelProvider scriptedModel = new ScriptedMockLLM();
+    Agent agent = check new ({
+        systemPrompt: {role: "Test Agent", instructions: "Answer the questions"},
+        model: scriptedModel,
+        tools: [searchTool, calculatorTool]
+    });
+
+    // `anydata` includes `()`, so a nil query compiles but must still fail fast rather than
+    // silently running an empty-prompt turn.
+    anydata query = ();
+    string|Error result = agent.run(query);
+    test:assertTrue(result is Error);
+    if result is Error {
+        test:assertEquals(result.message(), "Query must not be nil.");
+    }
+}
+
+@test:Config
 function testAgentRunExecutesMultipleToolCallsFromSingleLlmResponseTogether() returns error? {
     MultiToolCallMockLLM scriptedModel = new;
     Agent agent = check new ({

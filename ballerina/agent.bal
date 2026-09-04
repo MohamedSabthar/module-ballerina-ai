@@ -408,6 +408,12 @@ public isolated distinct class Agent {
     private isolated function runInternal(@display {label: "Query"} anydata|Prompt|Resume query,
             @display {label: "Session ID"} string sessionId = DEFAULT_SESSION_ID,
             Context context = new, typedesc<Trace|anydata> td = string) returns Trace|anydata|Error {
+        // `anydata` includes `()`, so this is not caught at compile time - a nil query would
+        // otherwise silently run an empty-prompt turn instead of failing fast.
+        if query is () {
+            return error("Query must not be nil.");
+        }
+
         // A `Resume` input continues a run that paused for human approval instead of starting a
         // new turn; the input type is the sole discriminator between the two.
         if query is Resume {
