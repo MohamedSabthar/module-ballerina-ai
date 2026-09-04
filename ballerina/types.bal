@@ -37,7 +37,7 @@ public type ChatRespMessage record {|
 #
 # + sessionId - The session whose paused run these decisions apply to
 # + decisions - The human's decisions, keyed by `ApprovalRequest.id`
-public type DecisionMessage record {|
+public type DecisionMessage readonly & record {|
     string sessionId;
     map<HumanResponse> decisions;
 |};
