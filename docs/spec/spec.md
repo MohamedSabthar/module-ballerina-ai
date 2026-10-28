@@ -127,20 +127,26 @@ public type ModelProvider distinct isolated client object {
 };
 ```
 
-A custom provider is implemented by including the type in a client class.
+A custom provider is implemented by including the type in a client class. Because `generate` is a dependently-typed
+function, Ballerina requires it to be implemented as an external function; a provider binds it to a native
+implementation, as `ai:Wso2ModelProvider` does.
 
 ```ballerina
 import ballerina/ai;
+import ballerina/jballerina.java;
 
 public isolated client class MyModelProvider {
     *ai:ModelProvider;
 
     isolated remote function chat(ai:ChatMessage[]|ai:ChatUserMessage messages,
             ai:ChatCompletionFunctions[] tools = [], string? stop = ()) returns ai:ChatAssistantMessage|ai:Error {
-        // Call the LLM and map the response.
+        // Call the LLM and map its response to an assistant message.
+        return {role: ai:ASSISTANT, content: "..."};
     }
 
-    isolated remote function generate(ai:Prompt prompt, typedesc<anydata> td = <>) returns td|ai:Error = external;
+    isolated remote function generate(ai:Prompt prompt, typedesc<anydata> td = <>) returns td|ai:Error = @java:Method {
+        'class: "org.example.provider.Generator"
+    } external;
 }
 ```
 
@@ -1198,7 +1204,10 @@ A run proceeds as follows.
 3. Each tool call is validated and executed.
     - The tool's result, or a description of its error, is returned to the model as an `ai:ChatFunctionMessage`.
       So an unknown tool name, invalid arguments, or a tool returning an error does not end the run, and the model
-      can correct itself in the next cycle.
+      can retry in the next cycle.
+    - When the tool name or arguments fail validation before execution, the model receives only the fixed message
+      `Tool extraction failed due to tool validation`, without details of the failure. When the tool fails during
+      execution, the message states the kind of failure and includes the error in a `<detail>` element.
     - An `ai:UnauthorizedError` is the exception. It is raised when a token for a secured tool cannot be
       obtained or validated, and it ends the run. The final answer is then a fixed message stating that the
       request could not be completed due to an authorization issue.
@@ -1384,7 +1393,7 @@ public function main() returns error? {
         foreach ai:ApprovalRequest request in result.detail().requests {
             decisions[request.id] = {outcome: ai:APPROVE};
         }
-        string answer = check supportAgent.run(<ai:Resume>{decisions}, sessionId = "s1");
+        string answer = check supportAgent.run(<ai:Resume>{decisions: decisions.cloneReadOnly()}, sessionId = "s1");
     }
 }
 ```
@@ -1495,7 +1504,10 @@ public isolated class SchedulerAgent {
     }
 
     public isolated function run(string|ai:Prompt query, string sessionId = "default-session",
-            ai:Context context = new) returns anydata|ai:Error => self.agent.run(query, sessionId, context);
+            ai:Context context = new) returns anydata|ai:Error {
+        string|ai:Error answer = self.agent.run(query, sessionId, context);
+        return answer;
+    }
 
     public isolated function trace(string|ai:Prompt query, string sessionId = "default-session",
             ai:Context context = new) returns ai:Trace|ai:Error => self.agent.run(query, sessionId, context);
@@ -1917,8 +1929,10 @@ public type Chunker isolated object {
 
 The library provides three chunkers. Each starts splitting with the configured strategy and recursively falls back to
 a finer-grained strategy when a piece exceeds `maxChunkSize` characters. `maxOverlapSize` is the maximum number of
-characters reused from the end of the previous chunk when creating the next one; the overlap is made of complete
-sentences taken in reverse from the previous chunk.
+characters reused from the end of the previous chunk when creating the next one. For `ai:GenericRecursiveChunker`,
+the overlap is made of complete sentences taken in reverse from the previous chunk. For `ai:MarkdownChunker` and
+`ai:HtmlChunker`, the overlap is the last piece of the previous chunk, split further with the strategy's own
+splitters until it fits within `maxOverlapSize`.
 
 ```ballerina
 public isolated class GenericRecursiveChunker {
@@ -1976,7 +1990,7 @@ public enum RecursiveChunkStrategy {
 |-------------|-------------------------------------------------------------|-----------------------------|
 | `PARAGRAPH` | Two or more newline characters (`"\n\n"`)                   | `SENTENCE`, `WORD`, `CHARACTER` |
 | `SENTENCE`  | Sentence boundaries detected by the OpenNLP sentence detector | `WORD`, `CHARACTER`       |
-| `LINE`      | One or more newline characters (`"\n"`)                     | `WORD`, `CHARACTER`         |
+| `LINE`      | One or more newline characters (`"\n"`)                     | `SENTENCE`, `WORD`, `CHARACTER` |
 | `WORD`      | One or more whitespace characters                           | `CHARACTER`                 |
 | `CHARACTER` | Individual characters                                       | —                           |
 
@@ -2663,7 +2677,7 @@ public type UnknownApprovalIdError distinct Error;
 | `LlmInvalidGenerationError`     | The model output cannot be interpreted, such as a response that cannot be parsed into a tool call or message.         | —                                               |
 | `ToolNotFoundError`             | The model requests a tool that is not registered with the agent.                                                      | —                                               |
 | `ToolInvalidInputError`         | The model provides arguments that do not match the input schema of the tool.                                          | —                                               |
-| `MissingHttpParameterError`     | The model omits a mandatory path or query parameter of an HTTP tool.                                                  | —                                               |
+| `MissingHttpParameterError`     | The model omits a path parameter of an HTTP tool. A missing query parameter is omitted from the request.             | —                                               |
 | `TaskCompletedError`            | The agent is asked to reason further after it has already produced its final answer.                                  | —                                               |
 | `HttpServiceToolKitError`       | An `HttpServiceToolKit` fails to execute an HTTP tool.                                                                | —                                               |
 | `HttpResponseParsingError`      | The response of an HTTP tool cannot be parsed.                                                                        | —                                               |
