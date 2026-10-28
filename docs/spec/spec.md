@@ -226,8 +226,9 @@ The `chat` remote method sends a conversation to the LLM and returns the next as
   `ChatAssistantMessage.toolCalls`; the method does not execute them.
 * `stop` is an optional stop sequence.
 
-A failure to reach the LLM is reported as `ai:LlmConnectionError` and a malformed or empty response as
-`ai:LlmInvalidResponseError` (see [Section 10](#10-errors)).
+A failure to reach the LLM is reported as `ai:LlmConnectionError` (see [Section 10](#10-errors)). For the
+`ai:Wso2ModelProvider`, a response without any choices is reported as `ai:LlmInvalidResponseError`, and tool-call
+arguments that cannot be parsed as JSON are reported as `ai:LlmError`.
 
 ```ballerina
 public function main(string subject) returns error? {
@@ -259,15 +260,17 @@ public type Prompt object {
 ```
 
 An `anydata` insertion is rendered as text. A `Document`/`Chunk` insertion lets a provider send non-text content
-(e.g. images) to the LLM. The set of document kinds a provider accepts is provider-specific; the
+(e.g. images) to the LLM. The set of document kinds a provider accepts is provider-specific. In `generate`, the
 `ai:Wso2ModelProvider` accepts `ai:TextDocument`, `ai:TextChunk` and `ai:ImageDocument` and returns an error for any
-other document kind.
+other document kind. In `chat`, a `Prompt` used as message content is flattened to a single trimmed string, and every
+insertion, including documents and chunks, is rendered as text.
 
 #### 2.4.2. Structured output
 
 The `generate` remote method sends a single prompt to the LLM and binds the response to the type described by `td`.
 The expected type is inferred from the assignment context when `td` is not given explicitly, and it MUST be a
-subtype of `anydata` that can be represented as JSON.
+subtype of `json`. This is not checked at compile time; with the `ai:Wso2ModelProvider`, an expected type that is not
+a subtype of `json` (e.g. one containing `xml` or `table`) causes a panic rather than an error.
 
 ```ballerina
 type JokeResponse record {|
@@ -287,7 +290,8 @@ A provider derives a JSON schema from the expected type and instructs the LLM to
 resolved in the following order:
 
 1. The schema given by the `@ai:JsonSchema` annotation on the type, if present.
-2. Otherwise, a schema generated from the type.
+2. Otherwise, the schema generated for the type by the compiler plugin at compile time, if one was generated.
+3. Otherwise, a schema generated from the type at runtime.
 
 The `@ai:JsonSchema` annotation lets users override the generated schema for a type.
 
@@ -311,7 +315,9 @@ type Review record {|
 The `ai:Wso2ModelProvider` implements structured output by exposing the schema as a single `getResults` tool and
 forcing the LLM to call it. When the expected type is not a JSON object, the schema is wrapped in an object under a
 `result` property and the value of that property is bound to the expected type. If the response cannot be bound to
-the expected type, `generate` returns an `ai:LlmInvalidGenerationError`.
+the expected type, `generate` returns an `ai:LlmInvalidGenerationError`. Other failures are returned as a plain
+`ai:Error` and are not retried: a failure to reach the LLM (`LLM call failed`), and a response that has no
+`getResults` tool call or whose arguments are not valid JSON (`No relevant response from the LLM`).
 
 #### 2.4.3. Generator configuration
 
@@ -919,13 +925,19 @@ public type Scopes record {|
 * `ai:Scopes` lists only the scopes. It is used for MCP dispatcher functions, whose authorization server is given by
   the `auth` argument of `getPermittedMcpToolConfigs`.
 
-The compiler plugin reports an error when a tool returning `mcp:CallToolResult` uses an `ai:AgentIdAuthConfig` and when any other tool uses `ai:Scopes`.
+When the `auth` field is given as an inline mapping constructor, the compiler plugin checks that the expected kind is
+used. A tool is treated as an MCP dispatcher when it has an `mcp:CallToolParams` parameter or its return type is a
+union that includes `mcp:CallToolResult`. Such a tool must use `ai:Scopes`, and any other tool must use
+`ai:AgentIdAuthConfig`. The two are told apart by field count: a mapping with exactly one field is treated as
+`ai:Scopes`. An `auth` value given as a variable reference is not checked.
 
 Before invoking a tool that declares `ai:AgentIdAuthConfig` auth, an agent with a credential:
 
 1. Reuses the cached access token for the tool, or obtains a new one from the authorization server when there is no
    cached token or it has expired. A failure to obtain a token results in an `ai:TokenAcquisitionError`, and a token
-   that fails validation in an `ai:TokenValidationError`.
+   that cannot be decoded as a JWT in an `ai:TokenValidationError`. A newly obtained token that has already expired is
+   neither cached nor made available to the tool; if the tool requires scopes, this results in an
+   `ai:InsufficientScopeError` in the next step.
 2. Verifies that the token carries every required scope. A missing scope results in an `ai:InsufficientScopeError`.
 3. Makes the token available to the tool through `ai:Context.getAccessToken` (see [Section 4.5](#45-context)).
 
@@ -1059,8 +1071,8 @@ The configuration fields have the following semantics.
 - `toolLoadingStrategy`: Controls which tool schemas are sent to the model.
     - `NO_FILTER` (default): Every registered tool schema is sent on every model call.
     - `LLM_FILTER`: On the first model call of a turn, the agent first makes an additional model call that
-      contains only the names and descriptions of the tools and asks the model to select the tools relevant to
-      the query. Only the schemas of the selected tools are sent in the reasoning call that follows. If the
+      sends the conversation history, with the names and descriptions of the tools appended to the last user
+      message, and asks the model to select the tools relevant to the query. Only the schemas of the selected tools are sent in the reasoning call that follows. If the
       selection call fails or its response cannot be interpreted, all tool schemas are sent. Later model calls
       in the same turn receive all tool schemas.
 - `executeToolCallsInParallel`: When `true` (default) and a single model response contains more than one tool
@@ -1069,7 +1081,9 @@ The configuration fields have the following semantics.
 - `credential`: The identity of the agent, used to obtain access tokens for secured tools (see
   [Section 5.6](#56-agent-identity)).
 
-An `ai:Agent` declared at module level must be declared `final`; otherwise the compiler plugin reports a compilation error.
+An `ai:Agent` declared at module level must be declared `final`; otherwise the compiler plugin reports a compilation
+error. The check applies to a module-level variable declared with the type `ai:Agent` and an initializer; declarations
+using `var`, an optional type such as `ai:Agent?`, or no initializer are not checked.
 
 ```ballerina
 import ballerina/ai;
@@ -1152,7 +1166,9 @@ At the start of a run, the agent loads the history of the session from memory.
 - The user message of the turn is then appended.
 
 The messages produced during the run are written to memory in a single batch once the run ends, whether it
-produced an answer or failed:
+produced an answer or failed. Memory is not written when the run fails before the loop starts (for example, when
+no schema can be derived for the expected type), or when a checkpoint for a pause cannot be persisted. The batch
+contains:
 - the system message
 - the user message
 - the tool call and tool result messages
@@ -1293,7 +1309,8 @@ If at least one call requires approval, none of the calls in the response are ex
 - `run` returns an `ai:ApprovalRequiredError` whose `requests` detail field lists the requests. When the
   expected type is `ai:Trace`, an `ai:Trace` with that error as its `output` is returned instead.
 - If the checkpoint cannot be persisted, the run does not pause. `run` returns an `ai:Error` stating that the
-  run cannot be paused.
+  run cannot be paused. When the expected type is `ai:Trace`, an `ai:Trace` with that error as its `output` is
+  returned instead.
 
 A pause is normal control flow, not a failure. The session's memory is not updated while a run is paused.
 
@@ -1493,7 +1510,7 @@ public isolated class SchedulerAgent {
 An `ai:Trace` records a complete agent execution:
 - the user message
 - every iteration, with the history sent to the model and the outputs it produced
-- the tool calls requested by the model
+- the tool calls requested by the model, excluding calls rejected during human approval
 - the schemas of the agent's tools
 - the final output
 - the start and end times
@@ -1527,8 +1544,12 @@ public type ToolSchema record {|
 |};
 ```
 
-Each `ai:Iteration` corresponds to one reasoning-action cycle. Its `output` contains one entry per tool call
-executed in the cycle, or a single assistant message or error. The `id` of a trace identifies the logical
+Each `ai:Iteration` usually corresponds to one reasoning-action cycle. Its `output` contains one entry per tool
+call executed in the cycle, or a single assistant message or error. A cycle that pauses for human approval is
+recorded as an iteration whose only output is the `ai:ApprovalRequiredError`, and each resume adds an iteration for
+the resolved batch of tool calls without a model call, so such a cycle spans two or more iterations. When a tool
+call fails with an `ai:UnauthorizedError`, the iteration's output stops at the failing call, even if later calls
+in a parallel batch were executed. The `id` of a trace identifies the logical
 execution and stays the same across pauses for human approval.
 
 To support agent evaluation, the library can load recorded traces from an evaluation dataset.
@@ -1639,7 +1660,9 @@ public type TrimOverflowHandlerConfiguration record {|
 ```
 
 On overflow, the oldest interactive messages are removed in multiples of `trimCount` until the incoming messages
-fit within the capacity, and the incoming messages are then stored.
+fit within the capacity, and the incoming messages are then stored. When a batch of messages is added, the stored
+and incoming messages are trimmed together, so a batch larger than the capacity also loses its own leading
+messages.
 
 #### 6.2.2. Model-assisted overflow handling
 
@@ -1732,7 +1755,8 @@ public isolated class MessageWindowChatMemory {
 ```
 
 `ai:MessageWindowChatMemory` keeps a sliding window of the most recent interactive messages per session in
-process memory, bounded by `size`, and evicts the oldest messages when the window is full. The system message is
+process memory and evicts the oldest messages when the window is full. When messages are added one at a time, the
+window holds at most `size - 1` interactive messages. The system message is
 stored separately from the window.
 
 ## 7. Retrieval-augmented generation
@@ -1975,8 +1999,10 @@ public enum MarkdownChunkStrategy {
 - `MARKDOWN_HEADER` splits by headers, starting with `h2` and recursively falling back to `h3` through `h6`, then to
   `CODE_BLOCK`, `HORIZONTAL_LINE`, `PARAGRAPH`, `LINE`, `SENTENCE`, `WORD`, and `CHARACTER`, in that order.
 - `CODE_BLOCK` splits by fenced code blocks. Chunks produced from a code block are not merged with other chunks, and
-  carry the `language` metadata when the block specifies a language.
-- `HORIZONTAL_LINE` splits by horizontal rules (`***`, `---`, `___`), falling back to `PARAGRAPH`.
+  carry `type` metadata with the value `code_block` and `language` metadata with the language of the block, or
+  `unknown` when the block does not specify one.
+- `HORIZONTAL_LINE` splits by horizontal rules (`***`, `---`, `___`), falling back to `PARAGRAPH`, `LINE`,
+  `SENTENCE`, `WORD`, and `CHARACTER`.
 
 ```ballerina
 public enum HtmlChunkStrategy {
@@ -1992,7 +2018,7 @@ public enum HtmlChunkStrategy {
 - `HTML_HEADER` splits by `<h1>` through `<h6>`, then falls back to `HTML_PARAGRAPH`, `HTML_LINE`, `SENTENCE`, `WORD`,
   and `CHARACTER`, in that order.
 - `HTML_PARAGRAPH` splits by `<p>` elements, then falls back to `HTML_LINE`, `SENTENCE`, `WORD`, and `CHARACTER`.
-- `HTML_LINE` splits by `<br>` elements, then falls back to `SENTENCE`, `WORD`, and `CHARACTER`.
+- `HTML_LINE` splits by the literal text `<br>` (other forms such as `<br/>` are not matched), then falls back to `SENTENCE`, `WORD`, and `CHARACTER`.
 
 #### 7.3.2. Automatic and disabled chunking
 
@@ -2302,7 +2328,9 @@ public type ChatService distinct service object {
 };
 ```
 
-The type itself does not declare any resource. The shape of the service is enforced by the compiler plugin as follows.
+The type itself does not declare any resource. The compiler plugin enforces the following shape on a service
+declaration attached to an `ai:Listener`. A service object attached programmatically through `attach` is not
+checked at compile time, and an unsupported shape surfaces as an error at runtime.
 
 - The service must declare a `post chat` resource. Its payload parameter must accept an `ai:ChatReqMessage`.
 - The service may declare a `post decision` resource to resume runs paused for human approval. Its payload parameter
@@ -2418,10 +2446,12 @@ import ballerina/ai.observe;
 
 ### 9.1. Spans
 
-Every span is an `AiSpan` and is completed by calling `close`. Passing an error to `close` marks the span as failed.
+Every span is an `AiSpan` and is completed by calling `close`. Passing an error to `close` marks the span as failed. `AiSpan` also declares a module-private `addTag` method over the module-private `GenAiTagNames` enum, so
+the type cannot be implemented outside the `ai.observe` module.
 
 ```ballerina
 public type AiSpan distinct isolated object {
+    isolated function addTag(GenAiTagNames key, anydata value);
     public isolated function close(error? err = ());
 };
 
@@ -2480,8 +2510,10 @@ The following span classes are defined. Each class is created through the corres
 | `RequestHumanApprovalSpan`      | `request_human_approval`      | `addPendingCount`, `addRequests`                                                                          |
 | `ResolveHumanApprovalSpan`      | `resolve_human_approval`      | `addDecisions`                                                                                            |
 
-The span name is the operation name followed by the name passed to the factory function (for example,
-`chat gpt-4o-mini` or `invoke_agent Assistant`).
+The span name is usually the operation name followed by the name passed to the factory function (for example,
+`chat gpt-4o-mini` or `invoke_agent Assistant`). The following agent identity spans are named differently:
+`agent_authentication Flow: <flowId>`, `validate_token from <provider>`, `validate_tool_authorization: <toolName>`,
+and `exchange_token`.
 
 ### 9.2. Span factory functions
 
@@ -2535,7 +2567,8 @@ public isolated function getCurrentAiSpan() returns AiSpan?;
 
 ### 10.1. Error hierarchy
 
-All errors returned by the library are subtypes of `ai:Error`.
+All errors returned by the library are subtypes of `ai:Error`, except those of `ai:Listener` and `ai:ChatClient`,
+which return `error` and may return errors of the `http` module.
 
 ```
 Error
