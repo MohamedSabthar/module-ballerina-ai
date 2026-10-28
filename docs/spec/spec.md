@@ -1616,10 +1616,16 @@ public type Memory isolated object {
 };
 ```
 
-- `get`: Returns the stored messages of the session. If a system message is stored, it is the first element.
-- `update`: Stores one message or a batch of messages for the session. A system message replaces any previously
-  stored system message instead of being appended.
+- `get`: Returns the stored messages of the session, oldest first.
+- `update`: Stores one message or a batch of messages for the session. After a completed run, an agent passes a single
+  batch: its system message, the user message, the tool call and tool result messages, and the final assistant
+  message. A run paused for human approval writes nothing until it is resumed and completes.
 - `delete`: Removes all messages of the session.
+
+Implementations should store the system message separately from the conversation: `update` replaces any stored
+system message instead of appending it, and `get` returns it first. This is not required: the agent drops any system
+message returned by `get` and always sends its current system prompt first. An implementation that limits its size
+should keep a tool call message and its tool result messages together.
 
 Any implementation of `ai:Memory` can be supplied to an agent. Durable human-in-the-loop checkpoints are available
 only with `ai:ShortTermMemory` (see [Section 5.5.4](#554-checkpoints)).
